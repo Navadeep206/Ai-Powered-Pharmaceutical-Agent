@@ -71,3 +71,4 @@ class CAPAResponse(BaseModel):
     related_root_cause_reference: Optional[str] = Field(default=None, description="Linked root cause reference")
     created_at: datetime = Field(..., description="Creation audit timestamp")
     updated_at: datetime = Field(..., description="Last modification timestamp")
+

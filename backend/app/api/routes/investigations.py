@@ -82,3 +82,4 @@ async def update_investigation(investigation_id: str, payload: InvestigationUpda
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail=f"Investigation update for '{investigation_id}' will be implemented in Step 03 Phase 3.",
     )
+

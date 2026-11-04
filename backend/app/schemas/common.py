@@ -46,3 +46,4 @@ class ErrorResponse(BaseModel):
     message: str = Field(..., description="Human-readable description of error")
     status_code: int = Field(..., description="HTTP status code")
     details: Optional[dict] = Field(default=None, description="Optional diagnostic details (no secrets)")
+

@@ -92,3 +92,4 @@ class RCAResponse(BaseModel):
     fishbone_causes: List[FishboneCause] = Field(..., description="Ishikawa 6M causal factors")
     investigator_notes: Optional[str] = Field(default=None, description="Investigator notes")
     updated_at: datetime = Field(..., description="Audit timestamp of last RCA update")
+

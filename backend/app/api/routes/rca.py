@@ -36,3 +36,4 @@ async def get_rca_analysis(investigation_id: str):
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail=f"RCA retrieval for investigation '{investigation_id}' will be implemented in Step 03 Phase 3.",
     )
+

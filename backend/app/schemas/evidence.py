@@ -61,3 +61,4 @@ class EvidenceResponse(BaseModel):
     review_status: EvidenceReviewStatusEnum = Field(..., description="Verification status")
     notes: Optional[str] = Field(default=None, description="Investigator notes")
     created_at: datetime = Field(..., description="Audit creation timestamp")
+

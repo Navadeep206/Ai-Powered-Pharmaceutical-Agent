@@ -80,3 +80,4 @@ class ExtractionAnalysisResponse(BaseModel):
         default="Extraction values are machine-generated recommendations and have NOT been verified by a qualified quality investigator.",
         description="Mandatory GxP non-repudiation and verification disclaimer",
     )
+

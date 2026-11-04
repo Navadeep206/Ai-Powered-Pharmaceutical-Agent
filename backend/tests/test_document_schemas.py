@@ -108,3 +108,4 @@ def test_analyze_document_endpoint_invalid_payload():
     }
     response = client.post("/api/documents/analyze", json=payload)
     assert response.status_code == 422
+

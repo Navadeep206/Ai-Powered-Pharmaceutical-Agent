@@ -49,3 +49,4 @@ async def analyze_document(payload: DocumentAnalysisRequest):
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail="AI entity extraction workflow will be implemented in subsequent phases.",
     )
+

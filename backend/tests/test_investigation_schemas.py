@@ -143,3 +143,4 @@ def test_patch_investigation_endpoint():
     payload = {"severity": "Low"}
     response = client.patch("/api/investigations/INV-2026-001", json=payload)
     assert response.status_code == 501
+

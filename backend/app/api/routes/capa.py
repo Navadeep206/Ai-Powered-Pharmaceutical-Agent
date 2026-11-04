@@ -37,3 +37,4 @@ async def list_capa(investigation_id: str):
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
         detail=f"CAPA retrieval for investigation '{investigation_id}' will be implemented in Step 03 Phase 3.",
     )
+

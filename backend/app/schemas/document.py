@@ -92,3 +92,4 @@ class DocumentAnalysisRequest(BaseModel):
         if self.intake_method == IntakeMethodEnum.EMAIL and not self.email_input:
             raise ValueError("email_input is required when intake_method is 'Email'")
         return self
+

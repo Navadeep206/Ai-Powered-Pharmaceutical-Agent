@@ -159,3 +159,4 @@ class InvestigationListResponse(BaseModel):
 
     items: List[InvestigationResponse] = Field(..., description="Array of investigation records")
     pagination: PaginationMetadata = Field(..., description="Pagination metadata")
+
