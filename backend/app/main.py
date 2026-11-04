@@ -4,22 +4,41 @@ AI-Powered Root Cause Analysis (RCA) and CAPA Intelligence Platform
 for Pharmaceutical API Manufacturing.
 """
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api.routes.health import router as health_router
+from app.core.logging import setup_logging, get_logger
+from app.core.errors import register_error_handlers
+from app.api.router import api_router
+
+logger = get_logger("main")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan context manager for startup and shutdown events."""
+    setup_logging()
+    logger.info("Initializing %s v%s (DEBUG=%s)", settings.APP_NAME, settings.APP_VERSION, settings.DEBUG)
+    yield
+    logger.info("Shutting down %s", settings.APP_NAME)
+
 
 app = FastAPI(
-    title="RootIQ API",
-    version="1.0.0",
+    title=settings.APP_NAME,
+    version=settings.APP_VERSION,
     description="Enterprise AI-Powered Root Cause Analysis (RCA) and CAPA Platform for Pharmaceutical API Manufacturing.",
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
+    lifespan=lifespan,
 )
 
-# Configure CORS Middleware
-origins = list(set(settings.CORS_ORIGINS + [settings.FRONTEND_URL, "http://localhost:5173"]))
+# Register Centralized Error Handlers
+register_error_handlers(app)
+
+# Configure CORS Middleware using settings.FRONTEND_URL and settings.CORS_ORIGINS
+origins = list(set(settings.CORS_ORIGINS + [settings.FRONTEND_URL]))
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,16 +48,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount Health check router at /api prefix (GET /api/health)
-app.include_router(health_router, prefix="/api")
+# Centrally register API router with /api prefix
+app.include_router(api_router)
 
 
 @app.get("/", tags=["Root"], include_in_schema=False)
 async def root():
     """Root redirect / information endpoint."""
     return {
-        "message": "Welcome to RootIQ API",
+        "message": f"Welcome to {settings.APP_NAME}",
         "docs": "/docs",
         "health": "/api/health",
-        "version": "1.0.0",
+        "version": settings.APP_VERSION,
     }
