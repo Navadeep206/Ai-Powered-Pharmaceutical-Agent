@@ -1,11 +1,103 @@
-"""Pydantic Request and Response Schemas.
+"""Pydantic Request and Response Schemas for RootIQ API.
 
 Enforces strict type validation and serialization for API boundaries:
-- AuthSchemas: User login, token payloads, and 21 CFR Part 11 signing credentials.
-- InvestigationSchemas: Creation, status updates, and summary schemas.
-- EvidenceSchemas: Metadata, file upload payloads, and parsed telemetry.
-- RCASchemas: Graph nodes, edges, Ishikawa categories, and 5-Whys structures.
-- CAPASchemas: Action item specifications, target dates, and effectiveness review payloads.
-- AuditSchemas: Audit query filters and cryptographically verifiable log formats.
+- Common schemas (pagination, response envelopes, error structures)
+- Investigation schemas (creation, update, response, list)
+- Document & Extraction schemas (upload, text intake, email intake, AI extraction analysis)
+- RCA schemas (5-Whys causal chains, Ishikawa 6M fishbone models)
+- Evidence schemas (supporting, contradictory, missing, investigator questions)
+- CAPA schemas (corrective and preventive actions, effectiveness verification)
 """
 
+from app.schemas.common import (
+    PaginationMetadata,
+    PaginatedResponse,
+    StandardResponse,
+    SuccessResponse,
+    ErrorResponse,
+)
+from app.schemas.investigation import (
+    SeverityEnum,
+    InvestigationStatusEnum,
+    InvestigationBase,
+    InvestigationCreate,
+    InvestigationUpdate,
+    InvestigationResponse,
+    InvestigationListResponse,
+)
+from app.schemas.document import (
+    IntakeMethodEnum,
+    DocumentUploadResponse,
+    TextIncidentInput,
+    EmailIncidentInput,
+    DocumentAnalysisRequest,
+)
+from app.schemas.extraction import (
+    ExtractedField,
+    IncidentExtractedData,
+    ExtractionAnalysisResponse,
+)
+from app.schemas.rca import (
+    FishboneCategoryEnum,
+    CauseVerificationStatusEnum,
+    FiveWhysLevel,
+    FishboneCause,
+    RCARequest,
+    RCAResponse,
+)
+from app.schemas.evidence import (
+    EvidenceTypeEnum,
+    EvidenceReviewStatusEnum,
+    EvidenceCreate,
+    EvidenceResponse,
+)
+from app.schemas.capa import (
+    CAPATypeEnum,
+    CAPAStatusEnum,
+    CAPACreate,
+    CAPAResponse,
+)
+
+__all__ = [
+    # Common
+    "PaginationMetadata",
+    "PaginatedResponse",
+    "StandardResponse",
+    "SuccessResponse",
+    "ErrorResponse",
+    # Investigation
+    "SeverityEnum",
+    "InvestigationStatusEnum",
+    "InvestigationBase",
+    "InvestigationCreate",
+    "InvestigationUpdate",
+    "InvestigationResponse",
+    "InvestigationListResponse",
+    # Document
+    "IntakeMethodEnum",
+    "DocumentUploadResponse",
+    "TextIncidentInput",
+    "EmailIncidentInput",
+    "DocumentAnalysisRequest",
+    # Extraction
+    "ExtractedField",
+    "IncidentExtractedData",
+    "ExtractionAnalysisResponse",
+    # RCA
+    "FishboneCategoryEnum",
+    "CauseVerificationStatusEnum",
+    "FiveWhysLevel",
+    "FishboneCause",
+    "RCARequest",
+    "RCAResponse",
+    # Evidence
+    "EvidenceTypeEnum",
+    "EvidenceReviewStatusEnum",
+    "EvidenceCreate",
+    "EvidenceResponse",
+    # CAPA
+    "CAPATypeEnum",
+    "CAPAStatusEnum",
+    "CAPACreate",
+    "CAPAResponse",
+]
