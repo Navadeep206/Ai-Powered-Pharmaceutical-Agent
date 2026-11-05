@@ -3,14 +3,23 @@
 from typing import Optional, Union
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
-from app.core.exceptions import DocumentProcessingError, IncidentIntakeError
+from app.agents import run_incident_extraction_workflow
+from app.core.exceptions import (
+    AIAuthenticationError,
+    AITimeoutError,
+    DocumentProcessingError,
+    IncidentIntakeError,
+)
 from app.database.session import get_db
 from app.schemas.document import (
     DocumentAnalysisRequest,
     DocumentExtractionResult,
     NormalizedIncidentIntake,
 )
-from app.schemas.extraction import ExtractionAnalysisResponse
+from app.schemas.extraction import (
+    ExtractionAnalysisResponse,
+    OverallExtractionStatus,
+)
 from app.services.document_service import document_service
 from app.services.extraction_service import extraction_service
 from app.services.intake_service import intake_service
@@ -71,7 +80,7 @@ async def upload_document(
     response_model=Union[NormalizedIncidentIntake, ExtractionAnalysisResponse],
     status_code=status.HTTP_200_OK,
     summary="Preprocess incident intake content",
-    description="Validates and normalizes multi-modal incident inputs (PDF extraction, narrative text, or email). If extract=true, additionally runs AI structured extraction via Groq.",
+    description="Validates and normalizes multi-modal incident inputs (PDF extraction, narrative text, or email). If extract=true, orchestrates LangGraph incident extraction workflow.",
 )
 async def analyze_document(
     payload: DocumentAnalysisRequest,
@@ -82,10 +91,16 @@ async def analyze_document(
     try:
         normalized_intake = intake_service.prepare_intake(payload)
         if extract:
-            return extraction_service.extract_incident_information(
-                normalized_intake=normalized_intake,
-                raise_on_error=raise_on_error,
-            )
+            response = run_incident_extraction_workflow(normalized_intake=normalized_intake)
+            if raise_on_error and response.extraction_status == OverallExtractionStatus.FAILED:
+                err_text = " ".join(response.warnings or []).lower()
+                if "timeout" in err_text:
+                    raise AITimeoutError(response.warnings[0] if response.warnings else "Groq request timed out.")
+                elif "authentication" in err_text:
+                    raise AIAuthenticationError(
+                        response.warnings[0] if response.warnings else "Groq authentication failed."
+                    )
+            return response
         return normalized_intake
     except IncidentIntakeError as err:
         raise err
@@ -95,8 +110,8 @@ async def analyze_document(
     "/extract",
     response_model=ExtractionAnalysisResponse,
     status_code=status.HTTP_200_OK,
-    summary="Extract structured incident information using Groq",
-    description="Executes normalization across document, narrative text, or email intake channels, then prompts Groq LLM to extract structured deviation attributes with provenance citations.",
+    summary="Extract structured incident information using LangGraph",
+    description="Executes normalization across document, narrative text, or email intake channels, then orchestrates LangGraph workflow nodes (input, extraction, validation, quality, finalization).",
 )
 async def extract_document_information(
     payload: DocumentAnalysisRequest,
@@ -105,12 +120,18 @@ async def extract_document_information(
         description="Whether to raise HTTP error on upstream AI failure instead of returning FAILED status",
     ),
 ):
-    """Executes normalization and performs structured information extraction via Groq ChatGroq."""
+    """Executes normalization and orchestrates structured information extraction via LangGraph workflow."""
     try:
         normalized_intake = intake_service.prepare_intake(payload)
-        return extraction_service.extract_incident_information(
-            normalized_intake=normalized_intake,
-            raise_on_error=raise_on_error,
-        )
+        response = run_incident_extraction_workflow(normalized_intake=normalized_intake)
+        if raise_on_error and response.extraction_status == OverallExtractionStatus.FAILED:
+            err_text = " ".join(response.warnings or []).lower()
+            if "timeout" in err_text:
+                raise AITimeoutError(response.warnings[0] if response.warnings else "Groq request timed out.")
+            elif "authentication" in err_text:
+                raise AIAuthenticationError(
+                    response.warnings[0] if response.warnings else "Groq authentication failed."
+                )
+        return response
     except IncidentIntakeError as err:
         raise err

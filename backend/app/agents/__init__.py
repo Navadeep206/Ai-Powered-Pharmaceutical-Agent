@@ -1,13 +1,20 @@
-"""LangGraph Multi-Agent RCA & CAPA Intelligence Architecture.
+"""LangGraph Multi-Agent RCA & CAPA Intelligence Architecture for RootIQ.
 
-Defines the multi-agent orchestration graph powered by LangGraph and Groq:
-1. EvidenceExtractorAgent: Ingests batch manufacturing records, SCADA sensor logs,
-   HPLC/GC chromatograms, and OOS lab reports.
-2. CausalHypothesisAgent: Generates Ishikawa (6M) and 5-Whys causal branches.
-3. RootCauseReasonerAgent: Evaluates evidence support, scores plausibility, and identifies root causes.
-4. CAPAPlannerAgent: Synthesizes corrective and preventive actions with S.M.A.R.T. criteria.
-5. GxPComplianceAgent: Verifies compliance with 21 CFR Part 11, ICH Q9, and ICH Q10 standards.
-
-NOTE: Implementation will be developed in future phases.
+Orchestrates multi-agent incident extraction, causal analysis, and compliance verification.
 """
 
+from app.agents.state import ExtractionWorkflowState
+from app.agents.graph import (
+    incident_extraction_workflow,
+    run_incident_extraction_workflow,
+    build_incident_extraction_graph,
+    memory_checkpointer,
+)
+
+__all__ = [
+    "ExtractionWorkflowState",
+    "incident_extraction_workflow",
+    "run_incident_extraction_workflow",
+    "build_incident_extraction_graph",
+    "memory_checkpointer",
+]

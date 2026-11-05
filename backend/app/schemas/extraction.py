@@ -240,6 +240,15 @@ class ExtractionAnalysisResponse(BaseModel):
     """Contract for AI-assisted intake analysis results."""
 
     analysis_id: str = Field(..., description="Tracking identifier for extraction run")
+    workflow_id: Optional[str] = Field(default=None, description="LangGraph execution workflow identifier")
+    workflow_status: Optional[str] = Field(
+        default=None,
+        description="Operational workflow execution status (COMPLETED, FAILED, IN_PROGRESS)",
+    )
+    duration_seconds: Optional[float] = Field(
+        default=None,
+        description="End-to-end processing duration in seconds",
+    )
     intake_method: IntakeMethodEnum = Field(..., description="Source intake modality")
     extraction_status: OverallExtractionStatus = Field(
         default=OverallExtractionStatus.NEEDS_REVIEW,

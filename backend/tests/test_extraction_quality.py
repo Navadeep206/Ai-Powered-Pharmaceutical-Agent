@@ -594,3 +594,4 @@ def test_preservation_of_original_ai_extraction_after_human_edit():
         assert batch_field.review_status == ReviewStatusEnum.HUMAN_CONFIRMED
         assert batch_field.is_verified is True
         assert batch_field.requires_human_review is False
+
