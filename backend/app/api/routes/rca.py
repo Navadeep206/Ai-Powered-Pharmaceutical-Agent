@@ -1,9 +1,10 @@
 """Root Cause Analysis (RCA) route definitions for RootIQ."""
 
+from typing import Optional
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from app.database.session import get_db
-from app.schemas.rca import RCARequest, RCAResponse
+from app.schemas.rca import RCAGenerateRequest, RCARequest, RCAResponse, RCAWorkflowResult
 from app.services.rca_service import rca_service
 
 router = APIRouter(prefix="/investigations/{investigation_id}/rca", tags=["Root Cause Analysis"])
@@ -29,6 +30,26 @@ async def save_rca_analysis(
     )
 
 
+@router.post(
+    "/generate",
+    response_model=RCAWorkflowResult,
+    status_code=status.HTTP_200_OK,
+    summary="Execute AI-assisted RCA reasoning workflow",
+    description="Runs LangGraph RCA workflow: 5-Whys, Ishikawa 6M Fishbone, Evidence Analysis, and Root Cause Synthesis.",
+)
+async def generate_rca_analysis(
+    investigation_id: str,
+    payload: Optional[RCAGenerateRequest] = None,
+    db: Session = Depends(get_db),
+):
+    """Orchestrates LangGraph RCA reasoning engine with Groq LLM and transactional PostgreSQL persistence."""
+    return rca_service.generate_rca(
+        db=db,
+        investigation_id=investigation_id,
+        payload=payload,
+    )
+
+
 @router.get(
     "",
     response_model=RCAResponse,
@@ -44,3 +65,4 @@ async def get_rca_analysis(
         db=db,
         investigation_id=investigation_id,
     )
+

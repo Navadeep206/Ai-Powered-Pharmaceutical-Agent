@@ -6,20 +6,28 @@ Pydantic validation, GxP quality assessment, and finalization with MemorySaver c
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+from sqlalchemy.orm import Session
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
+from app.agents.nodes.evidence_analysis_node import evidence_analysis_node
 from app.agents.nodes.extraction_node import incident_extraction_node
 from app.agents.nodes.finalization_node import finalization_node
+from app.agents.nodes.fishbone_node import fishbone_node
+from app.agents.nodes.five_whys_node import five_whys_node
 from app.agents.nodes.input_node import input_processing_node
 from app.agents.nodes.quality_node import quality_assessment_node
+from app.agents.nodes.rca_finalization_node import rca_finalization_node
+from app.agents.nodes.rca_prep_node import rca_prep_node
+from app.agents.nodes.synthesis_node import synthesis_node
 from app.agents.nodes.validation_node import structured_validation_node
-from app.agents.state import ExtractionWorkflowState
+from app.agents.state import ExtractionWorkflowState, RCAWorkflowState
 from app.core.logging import get_logger
 from app.schemas.document import NormalizedIncidentIntake
 from app.schemas.extraction import ExtractionAnalysisResponse
+from app.schemas.rca import RCAWorkflowResult
 
 logger = get_logger("agents.graph")
 
@@ -204,3 +212,142 @@ def run_incident_extraction_workflow(
         )
 
     return extraction_response
+
+
+# =============================================================================
+# RCA REASONING WORKFLOW GRAPH (FIVE WHYS, FISHBONE, EVIDENCE, SYNTHESIS)
+# =============================================================================
+
+def build_rca_reasoning_graph() -> StateGraph:
+    """Assemble the StateGraph structure for pharmaceutical RCA reasoning."""
+    builder = StateGraph(RCAWorkflowState)
+
+    # 1. Add Reasoning Nodes
+    builder.add_node("rca_prep_node", rca_prep_node)
+    builder.add_node("five_whys_node", five_whys_node)
+    builder.add_node("fishbone_node", fishbone_node)
+    builder.add_node("evidence_analysis_node", evidence_analysis_node)
+    builder.add_node("synthesis_node", synthesis_node)
+    builder.add_node("rca_finalization_node", rca_finalization_node)
+
+    # 2. Add Deterministic Sequence Edges
+    builder.add_edge(START, "rca_prep_node")
+    builder.add_edge("rca_prep_node", "five_whys_node")
+    builder.add_edge("five_whys_node", "fishbone_node")
+    builder.add_edge("fishbone_node", "evidence_analysis_node")
+    builder.add_edge("evidence_analysis_node", "synthesis_node")
+    builder.add_edge("synthesis_node", "rca_finalization_node")
+    builder.add_edge("rca_finalization_node", END)
+
+    return builder
+
+
+# Compiled RCA reasoning workflow with checkpointing
+rca_reasoning_workflow = build_rca_reasoning_graph().compile(
+    checkpointer=memory_checkpointer
+)
+
+
+def run_rca_reasoning_workflow(
+    problem_statement: Optional[str] = None,
+    incident_context: Optional[Dict[str, Any]] = None,
+    investigation_facts: Optional[List[Dict[str, Any]]] = None,
+    investigation_id: Optional[str] = None,
+    thread_id: Optional[str] = None,
+    persist: bool = False,
+    db: Optional[Session] = None,
+) -> RCAWorkflowResult:
+    """Execute the full LangGraph RCA reasoning workflow and return standardized RCAWorkflowResult."""
+    workflow_id = f"WF-RCA-{uuid.uuid4().hex[:10].upper()}"
+    active_thread_id = thread_id or workflow_id
+
+    initial_state: RCAWorkflowState = {
+        "workflow_id": workflow_id,
+        "investigation_id": investigation_id,
+        "thread_id": active_thread_id,
+        "source_type": "Incident Data",
+        "source_text": "",
+        "source_filename": None,
+        "source_metadata": {},
+        "problem_statement": problem_statement or "",
+        "incident_context": incident_context or {},
+        "investigation_facts": list(investigation_facts or []),
+        "evidence_records": [],
+        "five_whys_analysis": [],
+        "fishbone_analysis": [],
+        "potential_root_causes": [],
+        "contributing_factors": [],
+        "supporting_evidence": [],
+        "contradictory_evidence": [],
+        "missing_evidence": [],
+        "investigator_questions": [],
+        "rca_warnings": [],
+        "rca_status": "PENDING",
+        "human_review_required": True,
+        "persisted_in_db": False,
+        "rca_analysis_id": None,
+        "workflow_status": "PENDING",
+        "extraction_status": "PENDING",
+        "error_message": None,
+        "warnings": [],
+        "retry_count": 0,
+        "max_retries": 2,
+        "processing_started_at": datetime.now(timezone.utc).isoformat(),
+        "processing_completed_at": None,
+        "duration_seconds": None,
+    }
+
+    config = {"configurable": {"thread_id": active_thread_id}}
+
+    logger.info(
+        "Invoking LangGraph RCA reasoning workflow %s (thread=%s)",
+        workflow_id,
+        active_thread_id,
+    )
+
+    final_state = rca_reasoning_workflow.invoke(initial_state, config=config)
+    rca_result: Optional[RCAWorkflowResult] = final_state.get("rca_workflow_result")
+
+    if rca_result is None:
+        # Fallback safeguard in case finalization node was bypassed
+        rca_result = RCAWorkflowResult(
+            workflow_id=workflow_id,
+            investigation_id=investigation_id,
+            problem_statement=problem_statement or "Observed manufacturing process deviation.",
+            five_whys_analysis=[],
+            fishbone_analysis=[],
+            evidence_assessment=[],
+            potential_root_causes=[],
+            contributing_factors=[],
+            missing_evidence=[],
+            investigator_questions=[],
+            rca_warnings=final_state.get("rca_warnings", []),
+            rca_status="Failed",
+            human_review_required=True,
+            persisted_in_db=False,
+            analysis_id=None,
+            updated_at=datetime.now(timezone.utc),
+        )
+
+    # Optional database persistence
+    if persist and investigation_id and db is not None:
+        from app.services.rca_service import rca_service
+        try:
+            persisted_analysis = rca_service.persist_rca_workflow_result(
+                db=db,
+                investigation_id=investigation_id,
+                rca_result=rca_result,
+            )
+            rca_result.persisted_in_db = True
+            rca_result.analysis_id = str(persisted_analysis.id)
+            logger.info(
+                "Persisted RCA workflow result to PostgreSQL (rca_analysis_id=%s)",
+                persisted_analysis.id,
+            )
+        except Exception as err:
+            logger.error("Failed to persist RCA workflow result to database: %s", err)
+            rca_result.rca_warnings.append(f"Database persistence failed: {err}")
+
+    return rca_result
+
+

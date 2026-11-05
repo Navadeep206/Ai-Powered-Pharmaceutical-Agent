@@ -7,14 +7,17 @@ and human-in-the-loop verification boundaries adhering to ICH Q9 principles.
 from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
 from app.core.exceptions import (
     InvalidFishboneCategoryError,
     InvalidFiveWhysStructureError,
     InvalidRCACauseStatusError,
 )
 from app.core.logging import get_logger
+from app.models.rca import FishboneCause as FishboneCauseModel, FiveWhy, RCAAnalysis
 from app.repositories.activity_repository import activity_repository
+from app.repositories.evidence_repository import evidence_repository
 from app.repositories.investigation_repository import investigation_repository
 from app.repositories.rca_repository import rca_repository
 from app.schemas.rca import (
@@ -22,8 +25,10 @@ from app.schemas.rca import (
     FishboneCategoryEnum,
     FishboneCause,
     FiveWhysLevel,
+    RCAGenerateRequest,
     RCARequest,
     RCAResponse,
+    RCAWorkflowResult,
 )
 
 logger = get_logger("services.rca")
@@ -244,6 +249,192 @@ class RCAService:
             investigator_notes=analysis.summary,
             updated_at=analysis.updated_at,
         )
+
+    def persist_rca_workflow_result(
+        self,
+        db: Session,
+        investigation_id: str,
+        rca_result: RCAWorkflowResult,
+    ) -> RCAAnalysis:
+        """Persist RCA workflow findings and evidence into PostgreSQL without overwriting human-confirmed records."""
+        inv = investigation_repository.get_by_id(db, investigation_id)
+        if not inv:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Investigation '{investigation_id}' not found.",
+            )
+
+        try:
+            # 1. Fetch existing RCAAnalysis or create new
+            stmt = (
+                select(RCAAnalysis)
+                .where(RCAAnalysis.investigation_id == inv.id)
+                .order_by(RCAAnalysis.created_at.desc())
+                .options(
+                    selectinload(RCAAnalysis.five_whys),
+                    selectinload(RCAAnalysis.fishbone_causes),
+                )
+            )
+            analysis = db.scalars(stmt).first()
+
+            if not analysis:
+                analysis = RCAAnalysis(
+                    investigation_id=inv.id,
+                    analysis_method="COMBINED",
+                    analysis_status="Draft",
+                    summary=rca_result.problem_statement,
+                )
+                db.add(analysis)
+                db.flush()
+            else:
+                if not analysis.summary:
+                    analysis.summary = rca_result.problem_statement
+
+            # 2. Update Five Whys without overwriting human confirmed/reviewed
+            existing_whys = list(analysis.five_whys)
+            human_reviewed_whys = {
+                w.why_number: w
+                for w in existing_whys
+                if w.review_status in (
+                    CauseVerificationStatusEnum.HUMAN_REVIEWED,
+                    CauseVerificationStatusEnum.CONFIRMED_ROOT_CAUSE,
+                )
+            }
+
+            # Retain human reviewed whys
+            retained_whys = [w for w in existing_whys if w.why_number in human_reviewed_whys]
+            analysis.five_whys.clear()
+            for w in retained_whys:
+                analysis.five_whys.append(w)
+
+            # Add newly generated AI whys where human whys don't already occupy the level
+            for w in rca_result.five_whys_analysis:
+                if w.level not in human_reviewed_whys:
+                    new_why = FiveWhy(
+                        rca_analysis_id=analysis.id,
+                        why_number=w.level,
+                        question=w.question,
+                        answer=w.answer,
+                        supporting_evidence_references=w.supporting_evidence_references or w.evidence_references,
+                        is_root_cause=w.is_root_cause,
+                        review_status=w.status,
+                    )
+                    analysis.five_whys.append(new_why)
+
+            # 3. Update Fishbone causes without overwriting human confirmed/reviewed
+            existing_causes = list(analysis.fishbone_causes)
+            human_reviewed_causes = [
+                c for c in existing_causes
+                if c.review_status in (
+                    CauseVerificationStatusEnum.HUMAN_REVIEWED,
+                    CauseVerificationStatusEnum.CONFIRMED_ROOT_CAUSE,
+                )
+            ]
+            analysis.fishbone_causes.clear()
+            for c in human_reviewed_causes:
+                analysis.fishbone_causes.append(c)
+
+            for c in rca_result.fishbone_analysis:
+                cause_model = FishboneCauseModel(
+                    rca_analysis_id=analysis.id,
+                    category=c.category,
+                    cause_description=c.cause_description,
+                    evidence_references=c.supporting_evidence_references or c.evidence_references,
+                    cause_origin="AI Suggestion",
+                    review_status=c.status,
+                )
+                analysis.fishbone_causes.append(cause_model)
+
+            db.flush()
+
+            # 4. Persist Evidence assessments
+            existing_evidences = evidence_repository.list_by_investigation(db, inv.id)
+            existing_descriptions = {e.description.strip().lower() for e in existing_evidences}
+
+            for ev in rca_result.evidence_assessment:
+                desc_key = ev.evidence_description.strip().lower()
+                if desc_key not in existing_descriptions:
+                    evidence_repository.create(
+                        db,
+                        {
+                            "investigation_id": inv.id,
+                            "evidence_type": ev.evidence_type,
+                            "description": ev.evidence_description,
+                            "source_reference": ev.source_reference or "Investigation Dossier",
+                            "review_status": ev.review_status,
+                            "notes": ev.reasoning,
+                        },
+                    )
+                    existing_descriptions.add(desc_key)
+
+            # 5. Record activity
+            activity_repository.create(
+                db,
+                {
+                    "investigation_id": inv.id,
+                    "activity_type": "AI_RCA_GENERATED",
+                    "description": f"AI-assisted RCA reasoning executed for {inv.investigation_number}: {len(rca_result.five_whys_analysis)} Whys, {len(rca_result.fishbone_analysis)} Fishbone causes.",
+                    "actor_identifier": "RootIQ AI Engine",
+                    "activity_metadata": {
+                        "workflow_id": rca_result.workflow_id,
+                        "whys_count": len(rca_result.five_whys_analysis),
+                        "fishbone_count": len(rca_result.fishbone_analysis),
+                        "candidate_root_causes_count": len(rca_result.potential_root_causes),
+                    },
+                },
+            )
+
+            db.commit()
+            db.refresh(analysis)
+            return analysis
+        except Exception:
+            db.rollback()
+            raise
+
+    def generate_rca(
+        self,
+        db: Session,
+        investigation_id: str,
+        payload: Optional[RCAGenerateRequest] = None,
+    ) -> RCAWorkflowResult:
+        """Execute AI RCA reasoning workflow for an investigation and optionally persist."""
+        inv = investigation_repository.get_by_id(db, investigation_id)
+        if not inv:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Investigation '{investigation_id}' not found.",
+            )
+
+        problem_stmt = payload.problem_statement if payload and payload.problem_statement else None
+        incident_ctx = dict(payload.incident_context or {}) if payload and payload.incident_context else {}
+        facts = list(payload.investigation_facts or []) if payload and payload.investigation_facts else []
+        persist = payload.persist if payload is not None else True
+
+        # Enrich context from investigation if missing
+        inv_title = getattr(inv, "incident_title", getattr(inv, "title", None))
+        inv_desc = getattr(inv, "incident_description", getattr(inv, "description", None))
+        inv_equip = getattr(inv, "equipment", getattr(inv, "manufacturing_line", None))
+
+        if "title" not in incident_ctx and inv_title:
+            incident_ctx["title"] = inv_title
+        if "description" not in incident_ctx and inv_desc:
+            incident_ctx["description"] = inv_desc
+        if "batch_number" not in incident_ctx and inv.batch_number:
+            incident_ctx["batch_number"] = inv.batch_number
+        if "equipment_id" not in incident_ctx and inv_equip:
+            incident_ctx["equipment_id"] = inv_equip
+
+        from app.agents.graph import run_rca_reasoning_workflow
+
+        result = run_rca_reasoning_workflow(
+            problem_statement=problem_stmt,
+            incident_context=incident_ctx,
+            investigation_facts=facts,
+            investigation_id=str(inv.id),
+            persist=persist,
+            db=db,
+        )
+        return result
 
 
 # Singleton service instance

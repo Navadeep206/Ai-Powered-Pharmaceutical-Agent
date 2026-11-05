@@ -53,8 +53,13 @@ from app.schemas.rca import (
     CauseVerificationStatusEnum,
     FiveWhysLevel,
     FishboneCause,
+    EvidenceAssessment,
+    PotentialRootCause,
+    ContributingFactor,
+    RCAGenerateRequest,
     RCARequest,
     RCAResponse,
+    RCAWorkflowResult,
 )
 from app.schemas.evidence import (
     EvidenceTypeEnum,
@@ -114,8 +119,13 @@ __all__ = [
     "CauseVerificationStatusEnum",
     "FiveWhysLevel",
     "FishboneCause",
+    "EvidenceAssessment",
+    "PotentialRootCause",
+    "ContributingFactor",
+    "RCAGenerateRequest",
     "RCARequest",
     "RCAResponse",
+    "RCAWorkflowResult",
     # Evidence
     "EvidenceTypeEnum",
     "EvidenceReviewStatusEnum",
