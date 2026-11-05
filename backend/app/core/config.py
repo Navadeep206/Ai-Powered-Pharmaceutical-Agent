@@ -31,8 +31,41 @@ class Settings(BaseSettings):
     # Database Configuration (Placeholder safe default)
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres_password@localhost:5432/rootiq_db"
 
-    # AI / LLM Configuration (Placeholder safe default)
-    GROQ_API_KEY: str = "gsk_placeholder_replace_with_actual_key"
+    # AI / LLM Configuration
+    GROQ_API_KEY: str = "your_groq_api_key"
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_TEMPERATURE: float = 0.0
+    GROQ_MAX_TOKENS: int = 1024
+    GROQ_TIMEOUT: float = 30.0
+
+    @property
+    def is_groq_configured(self) -> bool:
+        """Verify whether a genuine, non-placeholder Groq API key is configured."""
+        if not self.GROQ_API_KEY:
+            return False
+        cleaned = self.GROQ_API_KEY.strip()
+        if not cleaned:
+            return False
+        # Filter known placeholder patterns
+        if cleaned.startswith("gsk_placeholder") or cleaned in (
+            "your_groq_api_key",
+            "your_available_groq_model",
+            "your_api_key",
+            "gsk_placeholder_key",
+            "gsk_placeholder_replace_with_actual_key",
+        ):
+            return False
+        return True
+
+    @property
+    def safe_groq_api_key(self) -> str:
+        """Return masked key for diagnostics without disclosing credentials."""
+        if not self.is_groq_configured:
+            return "not_configured"
+        k = self.GROQ_API_KEY.strip()
+        if len(k) <= 8:
+            return "***"
+        return f"{k[:4]}...{k[-4:]}"
 
     # Frontend Integration
     FRONTEND_URL: str = "http://localhost:5173"

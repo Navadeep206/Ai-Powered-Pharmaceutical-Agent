@@ -131,3 +131,4 @@ class RCARepository:
 
 # Singleton instance
 rca_repository = RCARepository()
+

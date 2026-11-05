@@ -44,3 +44,4 @@ class EvidenceRepository:
 
 # Singleton instance
 evidence_repository = EvidenceRepository()
+

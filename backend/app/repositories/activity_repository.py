@@ -40,3 +40,4 @@ class ActivityRepository:
 
 # Singleton instance
 activity_repository = ActivityRepository()
+

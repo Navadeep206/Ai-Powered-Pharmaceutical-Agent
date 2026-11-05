@@ -62,3 +62,4 @@ class DashboardService:
 
 # Singleton instance
 dashboard_service = DashboardService()
+

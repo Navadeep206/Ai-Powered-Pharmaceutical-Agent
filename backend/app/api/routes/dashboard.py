@@ -18,3 +18,4 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 async def get_dashboard_summary(db: Session = Depends(get_db)):
     """Derives live quality metrics directly from database state."""
     return dashboard_service.get_dashboard_summary(db=db)
+

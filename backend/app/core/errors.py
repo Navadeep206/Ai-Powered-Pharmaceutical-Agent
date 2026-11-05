@@ -17,6 +17,12 @@ from app.core.exceptions import (
     InvalidEmailInputError,
     CorruptedPDFError,
     PasswordProtectedPDFError,
+    AIRateLimitError,
+    AITimeoutError,
+    AIConfigurationError,
+    AIAuthenticationError,
+    AIModelUnavailableError,
+    AIConnectionError,
 )
 from app.core.logging import get_logger
 
@@ -48,6 +54,12 @@ def register_error_handlers(app: FastAPI) -> None:
             status_code = 400
         elif isinstance(exc, (CorruptedPDFError, PasswordProtectedPDFError)):
             status_code = 422
+        elif isinstance(exc, AIRateLimitError):
+            status_code = 429
+        elif isinstance(exc, AITimeoutError):
+            status_code = 504
+        elif isinstance(exc, (AIConfigurationError, AIAuthenticationError, AIModelUnavailableError, AIConnectionError)):
+            status_code = 503
         else:
             status_code = 422
 

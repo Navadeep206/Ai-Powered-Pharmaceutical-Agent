@@ -61,3 +61,4 @@ class CAPARepository:
 
 # Singleton instance
 capa_repository = CAPARepository()
+

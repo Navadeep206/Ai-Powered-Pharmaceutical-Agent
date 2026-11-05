@@ -158,3 +158,48 @@ class InvalidCAPAStatusTransitionError(CAPAError):
 
     pass
 
+
+# --- AI & LLM Service Exceptions ---
+
+
+class AIServiceError(RootIQBaseException):
+    """Base class for AI integration and provider errors."""
+
+    pass
+
+
+class AIConfigurationError(AIServiceError):
+    """Raised when Groq API key or required AI settings are missing or invalid."""
+
+    pass
+
+
+class AIAuthenticationError(AIServiceError):
+    """Raised when Groq rejects credentials with 401 Unauthorized."""
+
+    pass
+
+
+class AIModelUnavailableError(AIServiceError):
+    """Raised when specified Groq model does not exist, is decommissioned, or is inaccessible."""
+
+    pass
+
+
+class AIRateLimitError(AIServiceError):
+    """Raised when Groq API rate limits (tokens per minute or requests per minute) are exceeded."""
+
+    pass
+
+
+class AITimeoutError(AIServiceError):
+    """Raised when Groq API request exceeds configured timeout window."""
+
+    pass
+
+
+class AIConnectionError(AIServiceError):
+    """Raised when network failure or upstream provider downtime blocks connection to Groq."""
+
+    pass
+

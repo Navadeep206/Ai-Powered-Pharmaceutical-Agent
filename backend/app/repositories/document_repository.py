@@ -44,3 +44,4 @@ class DocumentRepository:
 
 # Singleton instance
 document_repository = DocumentRepository()
+

@@ -15,3 +15,4 @@ __all__ = [
     "capa_repository",
     "activity_repository",
 ]
+

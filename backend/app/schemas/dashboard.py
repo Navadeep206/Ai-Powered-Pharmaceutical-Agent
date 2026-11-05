@@ -19,3 +19,4 @@ class DashboardSummaryResponse(BaseModel):
     capa_actions_pending_review: int = Field(
         ..., ge=0, description="CAPA actions pending review, draft, or proposed approval"
     )
+

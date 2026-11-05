@@ -15,6 +15,8 @@ from app.services.investigation_service import InvestigationService, investigati
 from app.services.rca_service import RCAService, rca_service
 from app.services.evidence_service import EvidenceService, evidence_service
 from app.services.capa_service import CAPAService, capa_service
+from app.services.dashboard_service import DashboardService, dashboard_service
+from app.services.ai_service import AIService, ai_service
 
 __all__ = [
     "DocumentService",
@@ -29,4 +31,8 @@ __all__ = [
     "evidence_service",
     "CAPAService",
     "capa_service",
+    "DashboardService",
+    "dashboard_service",
+    "AIService",
+    "ai_service",
 ]

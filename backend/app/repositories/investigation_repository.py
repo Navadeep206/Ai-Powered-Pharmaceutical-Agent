@@ -111,3 +111,4 @@ class InvestigationRepository:
 
 # Singleton instance
 investigation_repository = InvestigationRepository()
+

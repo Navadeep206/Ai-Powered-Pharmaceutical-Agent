@@ -4,6 +4,7 @@ from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.database.connection import check_database_connectivity
+from app.services.ai_service import ai_service
 
 router = APIRouter(tags=["Health"])
 
@@ -49,3 +50,19 @@ async def get_readiness():
         "application": settings.APP_NAME,
         "version": settings.APP_VERSION,
     }
+
+
+@router.get(
+    "/health/ai",
+    summary="AI Provider Connectivity and Model Verification Probe",
+    description="Validates Groq API configuration and model responsiveness via a minimal harmless ping. Returns HTTP 200 when connected, or HTTP 503 when unconfigured or unreachable.",
+)
+async def get_ai_health():
+    """Verify Groq API connectivity and model responsiveness."""
+    result = ai_service.test_groq_connection()
+    status_code = status.HTTP_200_OK if result["connected"] else status.HTTP_503_SERVICE_UNAVAILABLE
+
+    return JSONResponse(
+        status_code=status_code,
+        content=result,
+    )
