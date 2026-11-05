@@ -1,4 +1,8 @@
-"""Schemas for AI-assisted structured incident information extraction."""
+"""Schemas for AI-assisted structured incident information extraction.
+
+Implements GxP non-hallucination compliance, provenance tracking, field validation,
+contradiction management, completeness assessment, and human review progression.
+"""
 
 from datetime import date
 from enum import Enum
@@ -28,10 +32,20 @@ class OverallExtractionStatus(str, Enum):
     FAILED = "FAILED"
 
 
+class ReviewStatusEnum(str, Enum):
+    """Human-in-the-loop audit review status. Machine extractions are never pre-confirmed."""
+
+    AI_SUGGESTED = "AI_SUGGESTED"
+    NEEDS_REVIEW = "NEEDS_REVIEW"
+    HUMAN_REVIEWED = "HUMAN_REVIEWED"
+    HUMAN_CONFIRMED = "HUMAN_CONFIRMED"
+
+
 class SourceReference(BaseModel):
     """Provenance tracking identifying where a value was supported in source text."""
 
     source_type: Optional[str] = Field(default=None, description="Modality: Document, Text, or Email")
+    original_filename: Optional[str] = Field(default=None, description="Original source document name if applicable")
     page_number: Optional[int] = Field(default=None, description="1-indexed PDF page number, if available")
     excerpt: Optional[str] = Field(default=None, description="Verbatim text snippet from source")
     char_offset_start: Optional[int] = Field(
@@ -40,13 +54,55 @@ class SourceReference(BaseModel):
     char_offset_end: Optional[int] = Field(
         default=None, description="End character offset in normalized source text"
     )
+    is_traceable: bool = Field(
+        default=True,
+        description="Indicates whether verbatim excerpt could be reliably located in source text",
+    )
+
+
+class PossibleContradiction(BaseModel):
+    """Structured record of conflicting evidence discovered within incident source text."""
+
+    field_name: str = Field(..., description="Target attribute where conflicting information was discovered")
+    conflicting_values: List[str] = Field(
+        ..., description="All distinct conflicting candidate values discovered in source"
+    )
+    source_references: List[SourceReference] = Field(
+        default_factory=list, description="Citations supporting each conflicting candidate"
+    )
+    description: str = Field(..., description="Detailed explanation of the contradiction and investigative impact")
+    resolution_status: str = Field(
+        default="INVESTIGATOR_REVIEW_REQUIRED",
+        description="Resolution state: INVESTIGATOR_REVIEW_REQUIRED, RESOLVED_BY_INVESTIGATOR",
+    )
+
+
+class CriticalGapItem(BaseModel):
+    """Structured record of missing mandatory information required for deviation closure."""
+
+    field_name: str = Field(..., description="Canonical missing attribute name")
+    category: str = Field(..., description="Criticality category: Critical GxP, High-Priority, or Supporting")
+    rationale: str = Field(..., description="Regulatory rationale why this missing information is critical")
+    suggested_action: str = Field(..., description="Recommended investigator action to resolve the gap")
 
 
 class ExtractedField(BaseModel, Generic[T]):
     """Encapsulates an AI-extracted candidate attribute with provenance and verification status."""
 
     field_name: str = Field(..., description="Canonical target attribute name")
-    value: Optional[T] = Field(default=None, description="Extracted candidate value, or None if missing/unsupported")
+    value: Optional[T] = Field(default=None, description="Current effective value (human edit if edited, else AI)")
+    ai_extracted_value: Optional[T] = Field(
+        default=None,
+        description="Immutable record of the original AI-extracted candidate value. Never overwritten by human edits.",
+    )
+    human_edited_value: Optional[T] = Field(
+        default=None,
+        description="Value supplied by a human quality investigator during review",
+    )
+    is_human_modified: bool = Field(
+        default=False,
+        description="Flag indicating whether a qualified investigator has modified the value",
+    )
     confidence_score: Optional[float] = Field(
         default=None,
         ge=0.0,
@@ -61,14 +117,34 @@ class ExtractedField(BaseModel, Generic[T]):
         default=FieldExtractionStatus.MISSING,
         description="Field-level state: EXTRACTED, MISSING, AMBIGUOUS, INFERRED",
     )
+    review_status: ReviewStatusEnum = Field(
+        default=ReviewStatusEnum.AI_SUGGESTED,
+        description="Human review status: AI_SUGGESTED, NEEDS_REVIEW, HUMAN_REVIEWED, HUMAN_CONFIRMED",
+    )
     requires_human_review: bool = Field(
         default=True,
         description="Indicates candidate field requires verification by a qualified investigator",
     )
     is_verified: bool = Field(
         default=False,
-        description="Audit flag indicating whether a qualified investigator has confirmed the value",
+        description="Audit flag indicating whether a qualified investigator has confirmed the value (True ONLY when HUMAN_CONFIRMED)",
     )
+    validation_warnings: List[str] = Field(
+        default_factory=list,
+        description="Field-level syntactic, domain, or format validation warnings",
+    )
+
+    def apply_human_edit(self, new_value: T, confirmed: bool = False) -> None:
+        """Apply human investigator edit while strictly preserving the original AI extraction."""
+        # Retain original AI extraction if not already preserved
+        if self.ai_extracted_value is None and not self.is_human_modified:
+            self.ai_extracted_value = self.value
+        self.human_edited_value = new_value
+        self.value = new_value
+        self.is_human_modified = True
+        self.requires_human_review = not confirmed
+        self.review_status = ReviewStatusEnum.HUMAN_CONFIRMED if confirmed else ReviewStatusEnum.HUMAN_REVIEWED
+        self.is_verified = confirmed
 
 
 class IncidentExtractedData(BaseModel):
@@ -177,21 +253,43 @@ class ExtractionAnalysisResponse(BaseModel):
         default_factory=list,
         description="Required or important fields not discovered in the source narrative",
     )
+    critical_gaps: List[str] = Field(
+        default_factory=list,
+        description="High-severity missing investigation attributes with regulatory rationales",
+    )
     ambiguous_fields: List[str] = Field(
         default_factory=list,
         description="Fields identified with contradictory or uncertain source text",
+    )
+    possible_contradictions: List[PossibleContradiction] = Field(
+        default_factory=list,
+        description="Contradictory information or conflicting statements identified in source text",
+    )
+    investigator_questions: List[str] = Field(
+        default_factory=list,
+        description="Targeted follow-up questions tailored to missing fields and critical evidence gaps",
+    )
+    completeness_score: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=100.0,
+        description="Weighted document coverage score (0.0 to 100.0). Represents information completeness in source, NOT extraction probability.",
+    )
+    extraction_warnings: List[str] = Field(
+        default_factory=list,
+        description="Quality, completeness, or data integrity warnings",
+    )
+    warnings: List[str] = Field(
+        default_factory=list,
+        description="Backward-compatible alias for extraction_warnings",
     )
     fields_requiring_review: List[str] = Field(
         default_factory=list,
         description="Fields requiring review due to ambiguity, low confidence, or GxP criticality",
     )
-    warnings: List[str] = Field(
-        default_factory=list,
-        description="Quality, completeness, or data integrity warnings",
-    )
     extraction_summary: Optional[str] = Field(
         default=None,
-        description="Executive summary of the extraction outcome and evidence gaps",
+        description="Executive summary of the extraction outcome, coverage, and evidence gaps",
     )
     overall_confidence: float = Field(
         default=0.0,

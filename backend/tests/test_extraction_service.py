@@ -622,3 +622,4 @@ def test_analyze_endpoint_extract_query_param():
         assert "extraction_status" in data
         assert data["extraction_status"] == "COMPLETED"
         assert data["extracted_data"]["batch_number"]["value"] == "BATCH-2026-9921"
+

@@ -40,7 +40,10 @@ from app.schemas.document import (
 from app.schemas.extraction import (
     FieldExtractionStatus,
     OverallExtractionStatus,
+    ReviewStatusEnum,
     SourceReference,
+    PossibleContradiction,
+    CriticalGapItem,
     ExtractedField,
     IncidentExtractedData,
     ExtractionAnalysisResponse,
@@ -99,7 +102,10 @@ __all__ = [
     # Extraction
     "FieldExtractionStatus",
     "OverallExtractionStatus",
+    "ReviewStatusEnum",
     "SourceReference",
+    "PossibleContradiction",
+    "CriticalGapItem",
     "ExtractedField",
     "IncidentExtractedData",
     "ExtractionAnalysisResponse",

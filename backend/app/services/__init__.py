@@ -18,6 +18,10 @@ from app.services.capa_service import CAPAService, capa_service
 from app.services.dashboard_service import DashboardService, dashboard_service
 from app.services.ai_service import AIService, ai_service
 from app.services.extraction_service import ExtractionService, extraction_service
+from app.services.extraction_quality_service import (
+    ExtractionQualityService,
+    extraction_quality_service,
+)
 
 __all__ = [
     "DocumentService",
@@ -38,4 +42,6 @@ __all__ = [
     "ai_service",
     "ExtractionService",
     "extraction_service",
+    "ExtractionQualityService",
+    "extraction_quality_service",
 ]
