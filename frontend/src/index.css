@@ -45,6 +45,12 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Accessible interactive focus rings */
+:focus-visible {
+  outline: 2px solid #0F9D91;
+  outline-offset: 2px;
+}
+
 /* Custom scrollbars for enterprise tables and sidebars */
 ::-webkit-scrollbar {
   width: 6px;
@@ -62,4 +68,13 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #94A3B8;
+}
+
+/* Hide scrollbar for tab navigation rows while retaining scroll functionality */
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }

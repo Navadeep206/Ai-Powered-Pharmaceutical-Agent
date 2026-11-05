@@ -80,8 +80,8 @@ export default function RecentInvestigations({ investigations = [], loading = fa
                       key={invId}
                       className="hover:bg-[#F8FAFC] transition-colors duration-150"
                     >
-                      <td className="px-5 py-3.5 font-mono text-xs font-bold text-[#142B45]">
-                        <span className="bg-[#F1F5F9] px-2 py-0.5 rounded border border-[#E2E8F0]">
+                      <td className="px-5 py-3.5 font-mono text-xs font-bold text-[#142B45] whitespace-nowrap">
+                        <span className="bg-[#F1F5F9] px-2.5 py-1 rounded border border-[#E2E8F0] whitespace-nowrap">
                           {invId}
                         </span>
                       </td>

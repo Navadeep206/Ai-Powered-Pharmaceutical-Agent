@@ -252,13 +252,13 @@ export default function InvestigationsPage() {
               <table className="w-full text-left text-sm text-[#334155]">
                 <thead className="bg-[#F8FAFC] border-b border-[#E2E8F0] text-xs font-semibold text-[#64748B] uppercase tracking-wider">
                   <tr>
-                    <th className="px-5 py-3.5">Investigation ID</th>
+                    <th className="px-5 py-3.5 whitespace-nowrap">Investigation ID</th>
                     <th className="px-5 py-3.5">Incident Title & Batch</th>
-                    <th className="px-5 py-3.5">Department</th>
-                    <th className="px-5 py-3.5">Severity</th>
-                    <th className="px-5 py-3.5">Status</th>
-                    <th className="px-5 py-3.5">Date Logged</th>
-                    <th className="px-5 py-3.5 text-right">Action</th>
+                    <th className="px-5 py-3.5 whitespace-nowrap">Department</th>
+                    <th className="px-5 py-3.5 whitespace-nowrap">Severity</th>
+                    <th className="px-5 py-3.5 whitespace-nowrap">Status</th>
+                    <th className="px-5 py-3.5 whitespace-nowrap">Date Logged</th>
+                    <th className="px-5 py-3.5 text-right whitespace-nowrap min-w-[140px]">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#F1F5F9] bg-white">
@@ -267,8 +267,8 @@ export default function InvestigationsPage() {
                       key={inv.id}
                       className="hover:bg-[#F8FAFC] transition-colors duration-150"
                     >
-                      <td className="px-5 py-4 font-mono text-xs font-bold text-[#142B45]">
-                        <span className="bg-[#F1F5F9] px-2 py-0.5 rounded border border-[#E2E8F0]">
+                      <td className="px-5 py-4 font-mono text-xs font-bold text-[#142B45] whitespace-nowrap">
+                        <span className="bg-[#F1F5F9] px-2.5 py-1 rounded border border-[#E2E8F0] whitespace-nowrap">
                           {inv.id}
                         </span>
                       </td>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import {
   fetchInvestigationById,
@@ -69,7 +69,13 @@ export default function InvestigationDetailPage() {
     capaError,
   } = useSelector((state) => state.investigations);
 
-  const [activeTab, setActiveTab] = useState('overview');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryTab = searchParams.get('tab');
+  const activeTab = ['overview', 'rca', 'evidence', 'capa'].includes(queryTab) ? queryTab : 'overview';
+
+  const handleTabChange = (newTab) => {
+    setSearchParams({ tab: newTab });
+  };
   const [rcaSubMethod, setRcaSubMethod] = useState('5whys'); // '5whys' | 'fishbone'
   const [overviewSavedToast, setOverviewSavedToast] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -407,17 +413,15 @@ export default function InvestigationDetailPage() {
 
   return (
     <div className="space-y-6">
-      {/* Workspace Header with Stepper and Metadata */}
+      {/* Workspace Header with Executive Metadata */}
       <InvestigationHeader
         investigation={currentInvestigation}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
       />
 
       {/* Main Tabs Navigation */}
       <InvestigationTabs
         activeTab={activeTab}
-        onTabChange={setActiveTab}
+        onTabChange={handleTabChange}
       />
 
       {/* Global Error Banners for Specific Tab Async Actions */}
@@ -566,7 +570,7 @@ export default function InvestigationDetailPage() {
                 <Button
                   variant="accent"
                   size="sm"
-                  onClick={() => setActiveTab('rca')}
+                  onClick={() => handleTabChange('rca')}
                 >
                   Proceed to RCA &rarr;
                 </Button>

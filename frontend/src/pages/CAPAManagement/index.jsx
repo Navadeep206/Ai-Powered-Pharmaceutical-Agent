@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   AlertCircle,
   User,
+  ShieldAlert,
 } from 'lucide-react';
 
 const STATUS_VARIANTS = {
@@ -42,7 +43,16 @@ export default function CAPAManagementPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+
+  // Debounce search input to avoid redundant API queries
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   const loadCapas = useCallback(async () => {
     setLoading(true);
@@ -52,8 +62,8 @@ export default function CAPAManagementPage() {
       if (statusFilter !== 'ALL') {
         params.status = statusFilter;
       }
-      if (searchTerm.trim()) {
-        params.search = searchTerm.trim();
+      if (debouncedSearch.trim()) {
+        params.search = debouncedSearch.trim();
       }
       const data = await capaService.listAllCAPA(params);
       setCapas(data || []);
@@ -62,7 +72,7 @@ export default function CAPAManagementPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, searchTerm]);
+  }, [statusFilter, debouncedSearch]);
 
   useEffect(() => {
     loadCapas();
@@ -113,24 +123,24 @@ export default function CAPAManagementPage() {
             {totalCount}
           </span>
         </Card>
-        <Card className="p-4 border border-[#E2E8F0]">
-          <span className="text-xs font-semibold text-[#D97706] uppercase tracking-wider block">
+        <Card className="p-4 border border-[#FDE68A] bg-[#FFFBEB]/30">
+          <span className="text-xs font-bold text-[#D97706] uppercase tracking-wider block">
             Pending QA Review
           </span>
           <span className="text-2xl font-bold text-[#D97706] mt-1 block">
             {pendingReviewCount}
           </span>
         </Card>
-        <Card className="p-4 border border-[#E2E8F0]">
-          <span className="text-xs font-semibold text-[#2563EB] uppercase tracking-wider block">
+        <Card className="p-4 border border-[#BFDBFE] bg-[#EFF6FF]/30">
+          <span className="text-xs font-bold text-[#2563EB] uppercase tracking-wider block">
             In Progress
           </span>
           <span className="text-2xl font-bold text-[#2563EB] mt-1 block">
             {inProgressCount}
           </span>
         </Card>
-        <Card className="p-4 border border-[#E2E8F0]">
-          <span className="text-xs font-semibold text-[#059669] uppercase tracking-wider block">
+        <Card className="p-4 border border-[#A7F3D0] bg-[#ECFDF5]/30">
+          <span className="text-xs font-bold text-[#059669] uppercase tracking-wider block">
             Completed & Closed
           </span>
           <span className="text-2xl font-bold text-[#059669] mt-1 block">
@@ -174,6 +184,7 @@ export default function CAPAManagementPage() {
                 leftIcon={RotateCcw}
                 onClick={() => {
                   setSearchTerm('');
+                  setDebouncedSearch('');
                   setStatusFilter('ALL');
                 }}
               >
@@ -223,30 +234,34 @@ export default function CAPAManagementPage() {
         <Table>
           <TableHeader>
             <TableRow hover={false}>
-              <TableHead>CAPA ID</TableHead>
+              <TableHead className="whitespace-nowrap">CAPA ID</TableHead>
               <TableHead>Remediation Target / Plan</TableHead>
-              <TableHead>Classification</TableHead>
-              <TableHead>Linked Investigation</TableHead>
-              <TableHead>Owner</TableHead>
-              <TableHead>Target Due Date</TableHead>
-              <TableHead>Lifecycle Status</TableHead>
+              <TableHead className="whitespace-nowrap">Classification</TableHead>
+              <TableHead className="whitespace-nowrap">Linked Investigation</TableHead>
+              <TableHead className="whitespace-nowrap">Owner</TableHead>
+              <TableHead className="whitespace-nowrap">Target Due Date</TableHead>
+              <TableHead className="whitespace-nowrap">Lifecycle Status</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {capas.map((capa) => {
               const statusVariant = STATUS_VARIANTS[capa.status] || 'neutral';
-              const capaId = capa.action_id || capa.id || 'CAPA-N/A';
-              const invRef = capa.investigation_id || capa.investigationId || 'N/A';
+              const rawId = capa.action_id || capa.id || 'CAPA-N/A';
+              const capaDisplayId = rawId.length > 18 ? `CAPA-${rawId.slice(0, 8).toUpperCase()}` : rawId;
+              const invRef = capa.investigation_number || capa.investigation_id || capa.investigationId || 'N/A';
 
               return (
-                <TableRow key={capaId}>
-                  <TableCell>
-                    <span className="font-mono text-xs font-bold text-[#142B45] bg-[#F1F5F9] px-2 py-1 rounded border border-[#E2E8F0]">
-                      {capaId}
+                <TableRow key={rawId}>
+                  <TableCell className="whitespace-nowrap">
+                    <span
+                      className="font-mono text-xs font-bold text-[#142B45] bg-[#F1F5F9] px-2.5 py-1 rounded border border-[#E2E8F0] whitespace-nowrap"
+                      title={rawId}
+                    >
+                      {capaDisplayId}
                     </span>
                   </TableCell>
                   <TableCell>
-                    <div className="font-medium text-[#142B45] max-w-sm line-clamp-2">
+                    <div className="font-semibold text-[#142B45] max-w-sm line-clamp-2">
                       {capa.description}
                     </div>
                     {capa.effectiveness_verification_method && (
@@ -255,33 +270,40 @@ export default function CAPAManagementPage() {
                       </div>
                     )}
                   </TableCell>
-                  <TableCell>
-                    <StatusBadge variant="neutral" size="sm" dot={false}>
+                  <TableCell className="whitespace-nowrap">
+                    <span
+                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                        (capa.action_type || '').includes('Corrective')
+                          ? 'bg-[#E6F7F5] text-[#0A736A]'
+                          : 'bg-[#EFF6FF] text-[#1E40AF]'
+                      }`}
+                    >
                       {capa.action_type || 'Corrective Action'}
-                    </StatusBadge>
+                    </span>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     <Link
-                      to={`/investigations/${encodeURIComponent(invRef)}`}
+                      to={`/investigations/${encodeURIComponent(invRef)}?tab=capa`}
                       className="font-mono text-xs text-[#0F9D91] hover:underline font-semibold flex items-center space-x-1"
+                      title="Open investigation CAPA tab"
                     >
                       <span>{invRef}</span>
                       <ExternalLink className="w-3 h-3 text-[#0F9D91]" />
                     </Link>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     <div className="flex items-center text-xs text-[#475569]">
-                      <User className="w-3 h-3 mr-1 text-[#94A3B8]" />
+                      <User className="w-3.5 h-3.5 mr-1 text-[#94A3B8]" />
                       <span>{capa.action_owner || 'Unassigned'}</span>
                     </div>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     <div className="flex items-center text-xs text-[#475569]">
                       <Clock className="w-3.5 h-3.5 mr-1 text-[#94A3B8]" />
                       <span>{capa.target_date || 'N/A'}</span>
                     </div>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     <StatusBadge variant={statusVariant} size="sm">
                       {capa.status || 'Draft'}
                     </StatusBadge>

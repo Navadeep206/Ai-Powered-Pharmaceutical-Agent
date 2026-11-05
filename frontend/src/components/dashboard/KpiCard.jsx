@@ -39,27 +39,29 @@ export default function KpiCard({
   const IconComponent = ICON_MAP[iconName] || FolderKanban;
 
   return (
-    <Card hover className="relative overflow-hidden">
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-xs font-semibold text-[#64748B] uppercase tracking-wider">
+    <Card hover className="relative overflow-hidden flex flex-col justify-between">
+      <CardContent className="p-4 sm:p-5 flex-1 flex flex-col justify-between">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-[11px] font-bold text-[#64748B] uppercase tracking-wider truncate">
               {title}
             </p>
-            <h3 className="text-3xl font-bold text-[#142B45] tracking-tight mt-1.5">
+            <h3 className="text-2xl sm:text-3xl font-extrabold text-[#142B45] tracking-tight mt-1">
               {value}
             </h3>
           </div>
-          <div className="w-10 h-10 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex items-center justify-center text-[#142B45] shadow-2xs">
-            <IconComponent className="w-5 h-5 text-[#0F9D91]" />
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] flex items-center justify-center text-[#142B45] shadow-2xs shrink-0">
+            <IconComponent className="w-4 h-4 sm:w-5 sm:h-5 text-[#0F9D91]" />
           </div>
         </div>
 
-        <div className="mt-3.5 flex items-center justify-between text-xs">
-          <span className="text-[#64748B] font-normal truncate mr-2">{label}</span>
+        <div className="mt-3 pt-2.5 border-t border-[#F8FAFC] flex flex-wrap items-center justify-between gap-1 text-[11px]">
+          <span className="text-[#64748B] font-medium leading-tight">
+            {label}
+          </span>
           {indicator && (
             <span
-              className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${
+              className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border shrink-0 ${
                 INDICATOR_STYLES[indicatorType] || INDICATOR_STYLES.neutral
               }`}
             >
@@ -71,4 +73,3 @@ export default function KpiCard({
     </Card>
   );
 }
-
