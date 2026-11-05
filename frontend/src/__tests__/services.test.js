@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import api from '../services/api';
 import investigationService from '../services/investigationService';
+import documentService from '../services/documentService';
 import dashboardService from '../services/dashboardService';
 import rcaService from '../services/rcaService';
 import evidenceService from '../services/evidenceService';
@@ -69,6 +70,81 @@ describe('API Service Modules Contract Verification', () => {
 
       await investigationService.updateInvestigation('INV-1', { incident_title: 'Updated title' });
       expect(spy).toHaveBeenCalledWith('/investigations/INV-1', { incident_title: 'Updated title' });
+    });
+  });
+
+  describe('documentService', () => {
+    it('calls POST /documents/upload with FormData and optional investigation_id', async () => {
+      const mockFile = new File(['%PDF-1.4 dummy content'], 'bmr_report.pdf', {
+        type: 'application/pdf',
+      });
+      const spy = vi.spyOn(api, 'post').mockResolvedValueOnce({
+        data: {
+          document_id: 'DOC-12345',
+          original_filename: 'bmr_report.pdf',
+          extraction_status: 'Success',
+          extracted_text: 'Extracted PDF text content',
+        },
+      });
+
+      const res = await documentService.uploadDocument(mockFile, 'INV-2026-001');
+      expect(spy).toHaveBeenCalledTimes(1);
+      const [url, formData, config] = spy.mock.calls[0];
+      expect(url).toBe('/documents/upload');
+      expect(formData instanceof FormData).toBe(true);
+      expect(config.params).toEqual({ investigation_id: 'INV-2026-001' });
+      expect(config.headers['Content-Type']).toBe('multipart/form-data');
+      expect(res.document_id).toBe('DOC-12345');
+    });
+
+    it('throws error if uploadDocument is invoked without a file', async () => {
+      await expect(documentService.uploadDocument(null)).rejects.toThrow(
+        'A valid PDF file is required for upload.'
+      );
+    });
+
+    it('calls POST /documents/extract with LangGraph extraction payload', async () => {
+      const payload = {
+        intake_method: 'Text',
+        text_input: {
+          incident_text: 'Thermal spike during crystallization batch 9921',
+        },
+      };
+
+      const spy = vi.spyOn(api, 'post').mockResolvedValueOnce({
+        data: {
+          analysis_id: 'EXT-9988',
+          extraction_status: 'NEEDS_REVIEW',
+          extracted_data: {
+            batch_number: { value: '9921', confidence_score: 0.95 },
+          },
+        },
+      });
+
+      const res = await documentService.extractDocument(payload);
+      expect(spy).toHaveBeenCalledWith('/documents/extract', payload, {
+        params: { raise_on_error: false },
+        timeout: 90000,
+      });
+      expect(res.analysis_id).toBe('EXT-9988');
+    });
+
+    it('calls POST /documents/analyze with query parameters', async () => {
+      const payload = {
+        intake_method: 'Email',
+        email_input: { subject: 'Urgent DEV', body: 'Alarm triggered' },
+      };
+
+      const spy = vi.spyOn(api, 'post').mockResolvedValueOnce({
+        data: { intake_id: 'INTK-123' },
+      });
+
+      const res = await documentService.analyzeDocument(payload, false);
+      expect(spy).toHaveBeenCalledWith('/documents/analyze', payload, {
+        params: { extract: false },
+        timeout: 15000,
+      });
+      expect(res.intake_id).toBe('INTK-123');
     });
   });
 

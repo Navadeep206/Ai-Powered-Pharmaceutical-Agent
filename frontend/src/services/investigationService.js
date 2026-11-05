@@ -54,3 +54,4 @@ export const investigationService = {
 };
 
 export default investigationService;
+

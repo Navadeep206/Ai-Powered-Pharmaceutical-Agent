@@ -10,9 +10,10 @@ import {
   setExtractionState,
   setExtractedData,
   updateExtractedField,
+  revertExtractedField,
   resetDraftIntake,
   createInvestigationAsync,
-  createNewInvestigationFromIntake,
+  analyzeIncidentIntake,
 } from '../../redux/slices/investigationSlice';
 import PageHeader from '../../components/common/PageHeader';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '../../components/common/Card';
@@ -23,7 +24,10 @@ import DocumentUpload from '../../components/investigation/DocumentUpload';
 import IncidentDescriptionInput from '../../components/investigation/IncidentDescriptionInput';
 import EmailIncidentInput from '../../components/investigation/EmailIncidentInput';
 import ExtractionReviewForm from '../../components/investigation/ExtractionReviewForm';
-import { SAMPLE_EXTRACTED_PAYLOAD } from '../../utils/demoData';
+import {
+  buildInvestigationPayloadFromReviewedData,
+  normalizeExtractionResponse,
+} from '../../utils/normalizers';
 import {
   ArrowLeft,
   Sparkles,
@@ -31,10 +35,15 @@ import {
   AlertCircle,
   Loader2,
   FileSearch,
+  CheckCircle2,
+  UploadCloud,
+  Cpu,
+  ShieldCheck,
+  AlertTriangle,
 } from 'lucide-react';
 
 /**
- * Start New Investigation Page supporting multi-modal intake and AI extraction review.
+ * Start New Investigation Page supporting real multi-modal intake and AI extraction review.
  */
 export default function NewInvestigationPage() {
   const navigate = useNavigate();
@@ -48,25 +57,29 @@ export default function NewInvestigationPage() {
     emailSubject,
     emailBody,
     extractionState,
+    analysisProgress,
+    extractionError,
     extractedData,
   } = draftIntake;
 
+  // Keep raw File object in local state (prevent storing non-serializable objects in Redux)
+  const [selectedFile, setSelectedFile] = useState(null);
   const [validationError, setValidationError] = useState(null);
   const [draftSavedToast, setDraftSavedToast] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Validate the active intake method before transitioning to simulated extraction
-  const handleAnalyzeIncident = () => {
+  // Validate active intake method and dispatch real AI extraction
+  const handleAnalyzeIncident = async () => {
     setValidationError(null);
 
     if (method === 'upload') {
-      if (!fileInfo) {
+      if (!selectedFile && !fileInfo) {
         setValidationError('Please select or drag a valid PDF document to proceed.');
         return;
       }
     } else if (method === 'text') {
-      if (!rawText || rawText.trim().length < 20) {
-        setValidationError('Please provide a descriptive incident narrative (at least 20 characters).');
+      if (!rawText || rawText.trim().length < 15) {
+        setValidationError('Please provide a descriptive incident narrative (at least 15 characters).');
         return;
       }
     } else if (method === 'email') {
@@ -76,29 +89,34 @@ export default function NewInvestigationPage() {
       }
     }
 
-    // Begin simulated AI extraction
-    dispatch(setExtractionState('analyzing'));
+    try {
+      const resultAction = await dispatch(
+        analyzeIncidentIntake({
+          method,
+          file: selectedFile,
+          rawText,
+          emailSubject,
+          emailBody,
+        })
+      );
 
-    // Simulated short analysis delay (1.2s)
-    setTimeout(() => {
-      // Seed extraction payload with any contextual values from the input
-      const payload = JSON.parse(JSON.stringify(SAMPLE_EXTRACTED_PAYLOAD));
-
-      if (method === 'text' && rawText) {
-        payload.incidentInfo.incidentDescription = rawText;
-      } else if (method === 'email') {
-        if (emailSubject) payload.incidentInfo.incidentTitle = emailSubject;
-        if (emailBody) payload.incidentInfo.incidentDescription = emailBody;
-      } else if (method === 'upload' && fileInfo) {
-        payload.context.initialObservations = `Extracted from PDF upload: ${fileInfo.name} (${fileInfo.size}). Batch records corroboration pending.`;
+      if (analyzeIncidentIntake.rejected.match(resultAction)) {
+        setValidationError(
+          resultAction.payload?.message ||
+            'AI extraction could not be completed. You can retry or proceed with manual form entry.'
+        );
       }
-
-      dispatch(setExtractedData(payload));
-    }, 1200);
+    } catch (err) {
+      setValidationError(err.message || 'An unexpected error occurred during incident analysis.');
+    }
   };
 
-  const handleUpdateExtractedField = (section, field, value) => {
-    dispatch(updateExtractedField({ section, field, value }));
+  const handleUpdateExtractedField = (section, field, value, canonicalKey) => {
+    dispatch(updateExtractedField({ section, field, value, canonicalKey }));
+  };
+
+  const handleRevertExtractedField = (section, field, canonicalKey) => {
+    dispatch(revertExtractedField({ section, field, canonicalKey }));
   };
 
   const handleSaveDraft = () => {
@@ -111,34 +129,18 @@ export default function NewInvestigationPage() {
     setIsSubmitting(true);
     setValidationError(null);
 
-    const payload = {
-      incident_title: extractedData.incidentInfo.incidentTitle || 'New Quality Deviation',
-      incident_description:
-        extractedData.incidentInfo.incidentDescription ||
-        'Initial deviation narrative recorded during incident intake.',
-      severity: ['Critical', 'High', 'Medium', 'Low'].includes(extractedData.incidentInfo.severity)
-        ? extractedData.incidentInfo.severity
-        : 'Medium',
-      batch_number: extractedData.incidentInfo.batchNumber || null,
-      product_name: extractedData.incidentInfo.productName || null,
-      department: extractedData.incidentInfo.department || null,
-      equipment: extractedData.incidentInfo.equipment || null,
-      deviation_id: extractedData.incidentInfo.deviationId || null,
-      immediate_action_taken: extractedData.incidentInfo.immediateActionTaken || null,
-      expected_condition: extractedData.context?.expectedCondition || null,
-      actual_condition: extractedData.context?.actualCondition || null,
-      observed_impact: extractedData.context?.observedImpact || null,
-      affected_process: extractedData.context?.affectedProcess || null,
-      initial_observations: extractedData.context?.initialObservations || null,
-    };
-
     try {
+      const payload = buildInvestigationPayloadFromReviewedData(extractedData);
       const resultAction = await dispatch(createInvestigationAsync(payload));
+
       if (createInvestigationAsync.fulfilled.match(resultAction)) {
         const created = resultAction.payload;
-        navigate(`/investigations/${encodeURIComponent(created.id || created.investigation_id)}`);
+        const targetId = created.id || created.investigation_id;
+        navigate(`/investigations/${encodeURIComponent(targetId)}`);
       } else {
-        setValidationError(resultAction.payload?.message || 'Failed to persist investigation in database.');
+        setValidationError(
+          resultAction.payload?.message || 'Failed to persist investigation in database.'
+        );
       }
     } catch (err) {
       setValidationError(err.message || 'An unexpected error occurred while saving investigation.');
@@ -148,7 +150,26 @@ export default function NewInvestigationPage() {
   };
 
   const handleResetIntake = () => {
+    setSelectedFile(null);
     dispatch(resetDraftIntake());
+    setValidationError(null);
+  };
+
+  // Fallback to manual entry if AI extraction service encounters an error
+  const handleProceedWithManualEntry = () => {
+    const fallbackResponse = normalizeExtractionResponse({
+      analysis_id: `MANUAL-${Date.now()}`,
+      intake_method: method === 'upload' ? 'Document' : method === 'email' ? 'Email' : 'Text',
+      extraction_status: 'NEEDS_REVIEW',
+      completeness_score: 25.0,
+      overall_confidence: 0.5,
+      extracted_data: {
+        incident_title: { value: emailSubject || (method === 'upload' ? fileInfo?.name : 'Quality Deviation Intake') },
+        incident_description: { value: rawText || emailBody || '' },
+      },
+    });
+
+    dispatch(setExtractedData(fallbackResponse));
     setValidationError(null);
   };
 
@@ -157,7 +178,7 @@ export default function NewInvestigationPage() {
       {/* Page Header */}
       <PageHeader
         title="Start New Investigation"
-        description="Submit incident information to initiate an AI-assisted quality investigation."
+        description="Submit incident information via PDF, narrative text, or email alert to initiate an AI-assisted quality investigation."
         breadcrumbs={[
           { label: 'RootIQ', to: '/' },
           { label: 'Investigations', to: '/investigations' },
@@ -166,6 +187,10 @@ export default function NewInvestigationPage() {
         badge={
           extractionState === 'extracted' ? (
             <StatusBadge variant="teal">Extraction Review</StatusBadge>
+          ) : extractionState === 'analyzing' ? (
+            <StatusBadge variant="warning">Analyzing</StatusBadge>
+          ) : extractionState === 'failed' ? (
+            <StatusBadge variant="danger">Review Required</StatusBadge>
           ) : (
             <StatusBadge variant="neutral">Intake Stage</StatusBadge>
           )
@@ -177,7 +202,7 @@ export default function NewInvestigationPage() {
                 Back to Registry
               </Button>
             </Link>
-            {extractionState === 'extracted' && (
+            {(extractionState === 'extracted' || extractionState === 'failed') && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -219,11 +244,11 @@ export default function NewInvestigationPage() {
                 </CardTitle>
                 <CardDescription>
                   {method === 'upload' &&
-                    'Select a Batch Manufacturing Record (BMR) or SCADA excursion PDF.'}
+                    'Select a Batch Manufacturing Record (BMR), SCADA excursion report, or deviation memo (PDF).'}
                   {method === 'text' &&
-                    'Paste raw operator logs or initial QA notification statements.'}
+                    'Paste raw operator logs, incident descriptions, or initial QA notification statements.'}
                   {method === 'email' &&
-                    'Enter subject line and body of deviation notification email.'}
+                    'Enter subject line and body of deviation notification email correspondence.'}
                 </CardDescription>
               </div>
               <StatusBadge variant="neutral" size="sm">
@@ -235,8 +260,14 @@ export default function NewInvestigationPage() {
               {method === 'upload' && (
                 <DocumentUpload
                   fileInfo={fileInfo}
-                  onFileSelect={(f) => dispatch(setIntakeFile(f))}
-                  onFileRemove={() => dispatch(clearIntakeFile())}
+                  onFileSelect={(meta, file) => {
+                    setSelectedFile(file);
+                    dispatch(setIntakeFile(meta));
+                  }}
+                  onFileRemove={() => {
+                    setSelectedFile(null);
+                    dispatch(clearIntakeFile());
+                  }}
                   error={validationError}
                   setError={setValidationError}
                 />
@@ -270,9 +301,9 @@ export default function NewInvestigationPage() {
               )}
             </CardContent>
 
-            <CardFooter className="py-4 bg-[#F8FAFC]">
+            <CardFooter className="py-4 bg-[#F8FAFC] flex items-center justify-between">
               <div className="text-xs text-[#64748B]">
-                Extraction maps entities into standard 21 CFR Part 11 investigation schema.
+                Intake invokes LangGraph extraction nodes and maps entities into 21 CFR Part 11 deviation records.
               </div>
 
               <Button
@@ -288,32 +319,135 @@ export default function NewInvestigationPage() {
         </div>
       )}
 
-      {/* State B: Simulated AI Analyzing Progress State */}
+      {/* State B: Real AI Analyzing Progress State */}
       {extractionState === 'analyzing' && (
-        <Card className="py-16 text-center shadow-md">
-          <CardContent className="space-y-4 max-w-md mx-auto">
-            <div className="w-14 h-14 rounded-full bg-[#E6F7F5] text-[#0F9D91] flex items-center justify-center mx-auto animate-pulse">
-              <FileSearch className="w-7 h-7 text-[#0F9D91]" />
+        <Card className="py-12 px-6 shadow-md border-[#CBD5E1]">
+          <CardContent className="space-y-6 max-w-lg mx-auto text-center">
+            <div className="w-16 h-16 rounded-2xl bg-[#E6F7F5] text-[#0F9D91] flex items-center justify-center mx-auto shadow-inner animate-pulse">
+              <FileSearch className="w-8 h-8 text-[#0F9D91]" />
             </div>
 
             <div className="space-y-1">
               <h3 className="text-lg font-bold text-[#142B45]">
-                Analyzing Incident Intake
+                Analyzing Quality Incident Intake
               </h3>
-              <p className="text-xs text-[#64748B]">
-                Simulating entity extraction: extracting batch IDs, process parameters, excursion timestamps, and initial observations...
+              <p className="text-xs text-[#64748B] leading-relaxed">
+                Orchestrating LangGraph extraction nodes, checking optical character requirements, and extracting GxP deviation parameters...
               </p>
             </div>
 
-            <div className="pt-4 flex items-center justify-center space-x-2 text-xs font-semibold text-[#0F9D91]">
+            {/* Stepper Progress Breakdown */}
+            <div className="space-y-2.5 text-left bg-[#F8FAFC] p-4 rounded-xl border border-[#E2E8F0]">
+              <div className="flex items-center space-x-3 text-xs">
+                {analysisProgress === 'uploading' ? (
+                  <Loader2 className="w-4 h-4 text-[#0F9D91] animate-spin shrink-0" />
+                ) : (
+                  <CheckCircle2 className="w-4 h-4 text-[#059669] shrink-0" />
+                )}
+                <span className={analysisProgress === 'uploading' ? 'font-semibold text-[#142B45]' : 'text-[#64748B]'}>
+                  1. Preprocessing incident intake payload
+                </span>
+              </div>
+
+              <div className="flex items-center space-x-3 text-xs">
+                {analysisProgress === 'extracting_text' ? (
+                  <Loader2 className="w-4 h-4 text-[#0F9D91] animate-spin shrink-0" />
+                ) : analysisProgress === 'analyzing' || analysisProgress === 'validating' ? (
+                  <CheckCircle2 className="w-4 h-4 text-[#059669] shrink-0" />
+                ) : (
+                  <div className="w-4 h-4 rounded-full border-2 border-[#CBD5E1] shrink-0" />
+                )}
+                <span className={analysisProgress === 'extracting_text' ? 'font-semibold text-[#142B45]' : 'text-[#64748B]'}>
+                  2. Document text stream parsing & OCR verification
+                </span>
+              </div>
+
+              <div className="flex items-center space-x-3 text-xs">
+                {analysisProgress === 'analyzing' ? (
+                  <Loader2 className="w-4 h-4 text-[#0F9D91] animate-spin shrink-0" />
+                ) : analysisProgress === 'validating' ? (
+                  <CheckCircle2 className="w-4 h-4 text-[#059669] shrink-0" />
+                ) : (
+                  <div className="w-4 h-4 rounded-full border-2 border-[#CBD5E1] shrink-0" />
+                )}
+                <span className={analysisProgress === 'analyzing' ? 'font-semibold text-[#142B45]' : 'text-[#64748B]'}>
+                  3. LangGraph structured extraction & entity mapping
+                </span>
+              </div>
+
+              <div className="flex items-center space-x-3 text-xs">
+                {analysisProgress === 'validating' ? (
+                  <Loader2 className="w-4 h-4 text-[#0F9D91] animate-spin shrink-0" />
+                ) : (
+                  <div className="w-4 h-4 rounded-full border-2 border-[#CBD5E1] shrink-0" />
+                )}
+                <span className={analysisProgress === 'validating' ? 'font-semibold text-[#142B45]' : 'text-[#64748B]'}>
+                  4. Completeness scoring & provenance tracking
+                </span>
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center justify-center space-x-2 text-xs font-semibold text-[#0F9D91]">
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Generating demonstration extraction review...</span>
+              <span>Processing with LangGraph workflow...</span>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* State C: Structured Extraction Review Experience */}
+      {/* State C: Failed Extraction / Fallback State */}
+      {extractionState === 'failed' && (
+        <Card className="border-[#FECACA] bg-white">
+          <CardHeader>
+            <div className="flex items-center space-x-2.5 text-[#991B1B]">
+              <AlertTriangle className="w-5 h-5 text-[#DC2626]" />
+              <CardTitle>AI Extraction Notice</CardTitle>
+            </div>
+            <CardDescription>
+              {extractionError ||
+                'The extraction pipeline could not process the provided intake content automatically.'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="p-3.5 rounded-xl bg-[#FFFBEB] border border-[#FDE68A] text-xs text-[#92400E] space-y-1">
+              <p className="font-semibold">Investigator Fallback Options:</p>
+              <p className="leading-relaxed">
+                You can proceed directly with manual form entry to record the investigation, or modify the source intake and retry analysis.
+              </p>
+            </div>
+          </CardContent>
+          <CardFooter className="flex items-center justify-between py-4 bg-[#F8FAFC]">
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={RotateCcw}
+              onClick={handleResetIntake}
+            >
+              Change Intake Source
+            </Button>
+            <div className="flex items-center space-x-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                leftIcon={Sparkles}
+                onClick={handleAnalyzeIncident}
+              >
+                Retry Analysis
+              </Button>
+              <Button
+                variant="accent"
+                size="sm"
+                rightIcon={ArrowRight}
+                onClick={handleProceedWithManualEntry}
+              >
+                Proceed with Manual Entry
+              </Button>
+            </div>
+          </CardFooter>
+        </Card>
+      )}
+
+      {/* State D: Structured Extraction Review Experience */}
       {extractionState === 'extracted' && extractedData && (
         <div className="space-y-4">
           {validationError && (
@@ -325,9 +459,11 @@ export default function NewInvestigationPage() {
           <ExtractionReviewForm
             extractedData={extractedData}
             onUpdateField={handleUpdateExtractedField}
+            onRevertField={handleRevertExtractedField}
             onSaveDraft={handleSaveDraft}
             onContinueToRCA={handleContinueToRCA}
             isDraftSaved={draftSavedToast}
+            isSubmitting={isSubmitting}
           />
         </div>
       )}

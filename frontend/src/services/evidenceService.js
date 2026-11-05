@@ -21,3 +21,4 @@ export const evidenceService = {
 };
 
 export default evidenceService;
+

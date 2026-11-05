@@ -1,9 +1,13 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import investigationService from '../../services/investigationService';
+import documentService from '../../services/documentService';
 import rcaService from '../../services/rcaService';
 import evidenceService from '../../services/evidenceService';
 import capaService from '../../services/capaService';
-import { normalizeInvestigation } from '../../utils/normalizers';
+import {
+  normalizeInvestigation,
+  normalizeExtractionResponse,
+} from '../../utils/normalizers';
 
 export const fetchInvestigations = createAsyncThunk(
   'investigations/fetchList',
@@ -56,6 +60,80 @@ export const createInvestigationAsync = createAsyncThunk(
     } catch (err) {
       return rejectWithValue({
         message: err.message || 'Failed to create quality investigation.',
+        statusCode: err.statusCode || null,
+        details: err.details || null,
+      });
+    }
+  }
+);
+
+/**
+ * Async thunk orchestrating real multi-modal intake preprocessing and LangGraph AI extraction.
+ */
+export const analyzeIncidentIntake = createAsyncThunk(
+  'investigations/analyzeIncidentIntake',
+  async ({ method, file, rawText, emailSubject, emailBody }, { dispatch, rejectWithValue }) => {
+    try {
+      let analysisPayload = null;
+
+      if (method === 'upload') {
+        if (!file) {
+          throw new Error('Please select or provide a valid PDF document to upload.');
+        }
+
+        dispatch(setAnalysisProgress('uploading'));
+        const uploadResult = await documentService.uploadDocument(file);
+
+        dispatch(setAnalysisProgress('extracting_text'));
+
+        // Handle scanned document requiring OCR
+        const statusUpper = (uploadResult.extraction_status || '').toUpperCase();
+        if (statusUpper.includes('OCR')) {
+          dispatch(setAnalysisProgress('ocr_required'));
+        }
+
+        analysisPayload = {
+          intake_method: 'Document',
+          document_id: uploadResult.document_id,
+          document_text: uploadResult.extracted_text || '',
+        };
+      } else if (method === 'text') {
+        if (!rawText || rawText.trim().length < 15) {
+          throw new Error('Please provide a descriptive incident narrative (at least 15 characters).');
+        }
+
+        dispatch(setAnalysisProgress('analyzing'));
+        analysisPayload = {
+          intake_method: 'Text',
+          text_input: {
+            incident_text: rawText.trim(),
+          },
+        };
+      } else if (method === 'email') {
+        if (!emailSubject?.trim() && !emailBody?.trim()) {
+          throw new Error('Please provide an email subject header or body content to analyze.');
+        }
+
+        dispatch(setAnalysisProgress('analyzing'));
+        analysisPayload = {
+          intake_method: 'Email',
+          email_input: {
+            subject: (emailSubject || 'Incident Notification Email').trim(),
+            body: (emailBody || emailSubject || '').trim(),
+          },
+        };
+      } else {
+        throw new Error(`Unsupported intake method: ${method}`);
+      }
+
+      dispatch(setAnalysisProgress('validating'));
+      const extractionResponse = await documentService.extractDocument(analysisPayload);
+      const normalized = normalizeExtractionResponse(extractionResponse);
+
+      return normalized;
+    } catch (err) {
+      return rejectWithValue({
+        message: err.message || 'Incident extraction failed.',
         statusCode: err.statusCode || null,
         details: err.details || null,
       });
@@ -137,11 +215,14 @@ const initialState = {
   // Intake State
   draftIntake: {
     method: 'upload',
-    fileInfo: null,
+    fileInfo: null, // Pure serializable metadata (name, size, type, lastModified)
     rawText: '',
     emailSubject: '',
     emailBody: '',
-    extractionState: 'idle',
+    extractionState: 'idle', // 'idle' | 'analyzing' | 'extracted' | 'failed'
+    analysisProgress: 'idle', // 'idle' | 'uploading' | 'extracting_text' | 'analyzing' | 'validating' | 'completed' | 'failed' | 'ocr_required'
+    extractionError: null,
+    extractionResponse: null,
     extractedData: null,
     isEdited: false,
   },
@@ -175,16 +256,120 @@ export const investigationSlice = createSlice({
     setExtractionState: (state, action) => {
       state.draftIntake.extractionState = action.payload;
     },
+    setAnalysisProgress: (state, action) => {
+      state.draftIntake.analysisProgress = action.payload;
+    },
     setExtractedData: (state, action) => {
       state.draftIntake.extractedData = action.payload;
       state.draftIntake.extractionState = 'extracted';
       state.draftIntake.isEdited = false;
     },
     updateExtractedField: (state, action) => {
-      const { section, field, value } = action.payload;
-      if (state.draftIntake.extractedData && state.draftIntake.extractedData[section]) {
+      const { section, field, value, canonicalKey } = action.payload;
+      if (!state.draftIntake.extractedData) return;
+
+      // 1. Update form section value
+      if (state.draftIntake.extractedData[section]) {
         state.draftIntake.extractedData[section][field] = value;
-        state.draftIntake.isEdited = true;
+      }
+
+      // 2. Update fieldMeta if present
+      const metaKey = canonicalKey || field;
+      if (state.draftIntake.extractedData.fieldMeta) {
+        let targetMeta = state.draftIntake.extractedData.fieldMeta[metaKey];
+        if (!targetMeta && section === 'context') {
+          const aliasMap = {
+            expectedCondition: 'expected_condition',
+            actualCondition: 'actual_condition',
+            observedImpact: 'potential_impact',
+            affectedProcess: 'process_stage',
+            initialObservations: 'observations',
+          };
+          if (aliasMap[field]) targetMeta = state.draftIntake.extractedData.fieldMeta[aliasMap[field]];
+        } else if (!targetMeta && section === 'incidentInfo') {
+          const aliasMap = {
+            deviationId: 'deviation_id',
+            batchNumber: 'batch_number',
+            incidentTitle: 'incident_title',
+            incidentDescription: 'incident_description',
+            productName: 'product_name',
+            apiName: 'api_name',
+            department: 'department',
+            equipment: 'equipment_id',
+            incidentDate: 'incident_date',
+            detectionDate: 'detection_date',
+            immediateActionTaken: 'immediate_action_taken',
+          };
+          if (aliasMap[field]) targetMeta = state.draftIntake.extractedData.fieldMeta[aliasMap[field]];
+        }
+
+        if (targetMeta) {
+          if (!targetMeta.is_human_modified && targetMeta.ai_extracted_value === null) {
+            targetMeta.ai_extracted_value = targetMeta.value;
+          }
+          targetMeta.value = value;
+          targetMeta.human_edited_value = value;
+          targetMeta.is_human_modified = true;
+          targetMeta.review_status = 'HUMAN_REVIEWED';
+          targetMeta.requires_human_review = false;
+        }
+      }
+
+      state.draftIntake.isEdited = true;
+    },
+    revertExtractedField: (state, action) => {
+      const { section, field, canonicalKey } = action.payload;
+      if (!state.draftIntake.extractedData) return;
+
+      const metaKey = canonicalKey || field;
+      let targetMeta = state.draftIntake.extractedData.fieldMeta?.[metaKey];
+
+      if (!targetMeta && section === 'context') {
+        const aliasMap = {
+          expectedCondition: 'expected_condition',
+          actualCondition: 'actual_condition',
+          observedImpact: 'potential_impact',
+          affectedProcess: 'process_stage',
+          initialObservations: 'observations',
+        };
+        if (aliasMap[field]) targetMeta = state.draftIntake.extractedData.fieldMeta?.[aliasMap[field]];
+      } else if (!targetMeta && section === 'incidentInfo') {
+        const aliasMap = {
+          deviationId: 'deviation_id',
+          batchNumber: 'batch_number',
+          incidentTitle: 'incident_title',
+          incidentDescription: 'incident_description',
+          productName: 'product_name',
+          apiName: 'api_name',
+          department: 'department',
+          equipment: 'equipment_id',
+          incidentDate: 'incident_date',
+          detectionDate: 'detection_date',
+          immediateActionTaken: 'immediate_action_taken',
+        };
+        if (aliasMap[field]) targetMeta = state.draftIntake.extractedData.fieldMeta?.[aliasMap[field]];
+      }
+
+      if (targetMeta) {
+        const originalValue = targetMeta.ai_extracted_value ?? '';
+        targetMeta.value = originalValue;
+        targetMeta.human_edited_value = null;
+        targetMeta.is_human_modified = false;
+        targetMeta.review_status = 'AI_SUGGESTED';
+        targetMeta.requires_human_review = true;
+
+        if (state.draftIntake.extractedData[section]) {
+          state.draftIntake.extractedData[section][field] = originalValue;
+        }
+      }
+    },
+    confirmExtractedField: (state, action) => {
+      const { canonicalKey } = action.payload;
+      const meta = state.draftIntake.extractedData?.fieldMeta?.[canonicalKey];
+      if (meta) {
+        meta.review_status = 'HUMAN_CONFIRMED';
+        meta.is_verified = true;
+        meta.requires_human_review = false;
       }
     },
     resetDraftIntake: (state) => {
@@ -195,6 +380,9 @@ export const investigationSlice = createSlice({
         emailSubject: '',
         emailBody: '',
         extractionState: 'idle',
+        analysisProgress: 'idle',
+        extractionError: null,
+        extractionResponse: null,
         extractedData: null,
         isEdited: false,
       };
@@ -345,6 +533,25 @@ export const investigationSlice = createSlice({
         state.currentInvestigation = action.payload;
       })
 
+      // AI Intake Extraction
+      .addCase(analyzeIncidentIntake.pending, (state) => {
+        state.draftIntake.extractionState = 'analyzing';
+        state.draftIntake.extractionError = null;
+      })
+      .addCase(analyzeIncidentIntake.fulfilled, (state, action) => {
+        state.draftIntake.extractionState = 'extracted';
+        state.draftIntake.analysisProgress = 'completed';
+        state.draftIntake.extractionResponse = action.payload;
+        state.draftIntake.extractedData = action.payload;
+        state.draftIntake.isEdited = false;
+        state.draftIntake.extractionError = null;
+      })
+      .addCase(analyzeIncidentIntake.rejected, (state, action) => {
+        state.draftIntake.extractionState = 'failed';
+        state.draftIntake.analysisProgress = 'failed';
+        state.draftIntake.extractionError = action.payload?.message || 'AI extraction failed.';
+      })
+
       // RCA
       .addCase(fetchInvestigationRCA.pending, (state) => {
         state.rcaLoading = true;
@@ -358,7 +565,6 @@ export const investigationSlice = createSlice({
             state.currentInvestigation.fiveWhys = action.payload.five_whys;
           }
           if (action.payload.fishbone_causes?.length > 0) {
-            // Group fishbone by category
             const grouped = {
               Manpower: [],
               Machine: [],
@@ -424,8 +630,11 @@ export const {
   setIntakeText,
   setIntakeEmail,
   setExtractionState,
+  setAnalysisProgress,
   setExtractedData,
   updateExtractedField,
+  revertExtractedField,
+  confirmExtractedField,
   resetDraftIntake,
   updateInvestigationDetails,
   updateFiveWhysLevel,

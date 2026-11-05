@@ -1,11 +1,19 @@
 import React, { useRef, useState } from 'react';
-import { UploadCloud, FileText, X, RefreshCw, AlertCircle, CheckCircle } from 'lucide-react';
+import { UploadCloud, FileText, X, RefreshCw, AlertCircle, CheckCircle, AlertTriangle } from 'lucide-react';
 import Button from '../common/Button';
 
 /**
  * PDF Document Upload drop zone with client-side format & size validation.
+ * Accepts PDF files for backend parsing and OCR verification.
  */
-export default function DocumentUpload({ fileInfo, onFileSelect, onFileRemove, error, setError }) {
+export default function DocumentUpload({
+  fileInfo,
+  onFileSelect,
+  onFileRemove,
+  error,
+  setError,
+  ocrWarning,
+}) {
   const fileInputRef = useRef(null);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -35,14 +43,22 @@ export default function DocumentUpload({ fileInfo, onFileSelect, onFileRemove, e
       return;
     }
 
+    // Size limit check (25 MB)
+    if (file.size > 25 * 1024 * 1024) {
+      setError('File size exceeds the 25 MB limit for document upload.');
+      return;
+    }
+
     setError(null);
-    onFileSelect({
+    const meta = {
       name: file.name,
       size: formatFileSize(file.size),
       rawBytes: file.size,
       type: file.type || 'application/pdf',
       lastModified: new Date(file.lastModified).toLocaleDateString(),
-    });
+    };
+
+    onFileSelect(meta, file);
   };
 
   const handleDragOver = (e) => {
@@ -113,8 +129,15 @@ export default function DocumentUpload({ fileInfo, onFileSelect, onFileRemove, e
 
           <div className="p-2.5 rounded-lg bg-[#ECFDF5] border border-[#A7F3D0] flex items-center space-x-2 text-xs text-[#065F46]">
             <CheckCircle className="w-4 h-4 text-[#059669] shrink-0" />
-            <span>Ready for simulated AI entity extraction. File validated locally.</span>
+            <span>PDF validated locally. Ready for secure text parsing and AI structured extraction.</span>
           </div>
+
+          {ocrWarning && (
+            <div className="p-2.5 rounded-lg bg-[#FFFBEB] border border-[#FDE68A] flex items-center space-x-2 text-xs text-[#92400E]">
+              <AlertTriangle className="w-4 h-4 text-[#D97706] shrink-0" />
+              <span>{ocrWarning}</span>
+            </div>
+          )}
         </div>
       ) : (
         /* Empty Upload Drop Area */
@@ -155,4 +178,3 @@ export default function DocumentUpload({ fileInfo, onFileSelect, onFileRemove, e
     </div>
   );
 }
-

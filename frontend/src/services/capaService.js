@@ -33,3 +33,4 @@ export const capaService = {
 };
 
 export default capaService;
+
