@@ -27,10 +27,14 @@ from app.schemas.investigation import (
 )
 from app.schemas.document import (
     IntakeMethodEnum,
+    PageExtractionResult,
+    DocumentExtractionResult,
     DocumentUploadResponse,
     TextIncidentInput,
     EmailIncidentInput,
     DocumentAnalysisRequest,
+    PageReference,
+    NormalizedIncidentIntake,
 )
 from app.schemas.extraction import (
     ExtractedField,
@@ -75,10 +79,14 @@ __all__ = [
     "InvestigationListResponse",
     # Document
     "IntakeMethodEnum",
+    "PageExtractionResult",
+    "DocumentExtractionResult",
     "DocumentUploadResponse",
     "TextIncidentInput",
     "EmailIncidentInput",
     "DocumentAnalysisRequest",
+    "PageReference",
+    "NormalizedIncidentIntake",
     # Extraction
     "ExtractedField",
     "IncidentExtractedData",

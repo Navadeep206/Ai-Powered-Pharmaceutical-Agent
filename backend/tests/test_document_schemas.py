@@ -10,6 +10,7 @@ from app.schemas.document import (
     TextIncidentInput,
     EmailIncidentInput,
 )
+from tests.conftest import build_pdf_with_text
 
 client = TestClient(app)
 
@@ -55,7 +56,7 @@ def test_valid_email_analysis_request():
 def test_mismatched_intake_method_rejection():
     """Verify that specifying an intake method without providing its required sub-payload raises an error."""
     with pytest.raises(ValidationError):
-        # Selected DOCUMENT intake but did not supply document_id
+        # Selected DOCUMENT intake but did not supply document_id or document_text
         DocumentAnalysisRequest(intake_method=IntakeMethodEnum.DOCUMENT)
 
     with pytest.raises(ValidationError):
@@ -78,16 +79,24 @@ def test_upload_non_pdf_rejection():
     assert "Only PDF documents" in response.json()["message"]
 
 
-def test_upload_pdf_contract_status():
-    """Verify POST /api/documents/upload with valid PDF returns HTTP 501 Not Implemented."""
-    files = {"file": ("batch_record_excursion.pdf", b"%PDF-1.4 simulated pdf bytes", "application/pdf")}
+def test_upload_pdf_real_extraction():
+    """Verify POST /api/documents/upload extracts real PDF text in-memory."""
+    pdf_bytes = build_pdf_with_text([
+        "Deviation DEV-2026-0891: Reactor R-102 temperature exceeded 78C limit reaching 84C."
+    ])
+    files = {"file": ("batch_record_excursion.pdf", pdf_bytes, "application/pdf")}
     response = client.post("/api/documents/upload", files=files)
-    assert response.status_code == 501
-    assert "PDF document extraction pipeline" in response.json()["message"]
+    assert response.status_code == 201
+    data = response.json()
+    assert data["number_of_pages"] == 1
+    assert data["extraction_status"] == "Success"
+    assert "Reactor R-102 temperature exceeded 78C" in data["extracted_text"]
+    assert len(data["page_wise_content"]) == 1
+    assert data["page_wise_content"][0]["page_number"] == 1
 
 
-def test_analyze_document_endpoint_valid():
-    """Verify POST /api/documents/analyze with valid payload returns HTTP 501 Not Implemented."""
+def test_analyze_document_endpoint_valid_text():
+    """Verify POST /api/documents/analyze normalizes text intake and provides GxP disclaimer."""
     payload = {
         "intake_method": "Text",
         "text_input": {
@@ -96,8 +105,30 @@ def test_analyze_document_endpoint_valid():
         },
     }
     response = client.post("/api/documents/analyze", json=payload)
-    assert response.status_code == 501
-    assert "AI entity extraction workflow" in response.json()["message"]
+    assert response.status_code == 200
+    data = response.json()
+    assert data["source_type"] == "Text"
+    assert "Impeller speed fluctuated" in data["prepared_incident_text"]
+    assert data["processing_status"] == "Ready for AI Analysis"
+    assert "AI entity extraction has NOT yet been executed" in data["disclaimer"]
+
+
+def test_analyze_document_endpoint_valid_email():
+    """Verify POST /api/documents/analyze normalizes email intake."""
+    payload = {
+        "intake_method": "Email",
+        "email_input": {
+            "subject": "Deviation in Batch 8821",
+            "body": "Operator noted white particulate accumulation in inline 0.2 micron sterile filter.",
+            "sender": "qa.inspector@pharma.corp",
+        },
+    }
+    response = client.post("/api/documents/analyze", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["source_type"] == "Email"
+    assert data["subject"] == "Deviation in Batch 8821"
+    assert "qa.inspector@pharma.corp" in data["prepared_incident_text"]
 
 
 def test_analyze_document_endpoint_invalid_payload():
@@ -108,4 +139,3 @@ def test_analyze_document_endpoint_invalid_payload():
     }
     response = client.post("/api/documents/analyze", json=payload)
     assert response.status_code == 422
-

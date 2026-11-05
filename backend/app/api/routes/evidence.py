@@ -2,7 +2,9 @@
 
 from typing import List
 from fastapi import APIRouter, HTTPException, status
+from app.core.exceptions import EvidenceError
 from app.schemas.evidence import EvidenceCreate, EvidenceResponse
+from app.services.evidence_service import evidence_service
 
 router = APIRouter(prefix="/investigations/{investigation_id}/evidence", tags=["Evidence"])
 
@@ -15,13 +17,18 @@ router = APIRouter(prefix="/investigations/{investigation_id}/evidence", tags=["
     description="Validates and attaches supporting, contradictory, or missing evidence items.",
 )
 async def create_evidence(investigation_id: str, payload: EvidenceCreate):
-    """Scaffolding contract: Validates evidence schema.
+    """Executes business validation on evidence description, type, and source citations.
 
     Returns HTTP 501 Not Implemented pending database persistence.
     """
+    try:
+        validated_evidence = evidence_service.validate_evidence(payload)
+    except EvidenceError as err:
+        raise err
+
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail=f"Evidence persistence for investigation '{investigation_id}' will be implemented in Step 03 Phase 3.",
+        detail=f"Evidence persistence for investigation '{investigation_id}' will be implemented in future phase; validation succeeded.",
     )
 
 
@@ -35,6 +42,5 @@ async def list_evidence(investigation_id: str):
     """Scaffolding contract: Returns HTTP 501 Not Implemented pending database integration."""
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail=f"Evidence retrieval for investigation '{investigation_id}' will be implemented in Step 03 Phase 3.",
+        detail=f"Evidence retrieval for investigation '{investigation_id}' will be implemented in future phase.",
     )
-

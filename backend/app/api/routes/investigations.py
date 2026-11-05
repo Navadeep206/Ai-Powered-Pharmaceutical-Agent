@@ -2,14 +2,16 @@
 
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, status
+from app.core.exceptions import InvestigationError
 from app.schemas.investigation import (
     InvestigationCreate,
-    InvestigationUpdate,
-    InvestigationResponse,
     InvestigationListResponse,
-    SeverityEnum,
+    InvestigationResponse,
     InvestigationStatusEnum,
+    InvestigationUpdate,
+    SeverityEnum,
 )
+from app.services.investigation_service import investigation_service
 
 router = APIRouter(prefix="/investigations", tags=["Investigations"])
 
@@ -19,16 +21,22 @@ router = APIRouter(prefix="/investigations", tags=["Investigations"])
     response_model=InvestigationResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new quality investigation",
-    description="Validates incident particulars and registers a new investigation record.",
+    description="Validates incident particulars against pharmaceutical domain rules and registers a new investigation record.",
 )
 async def create_investigation(payload: InvestigationCreate):
-    """Scaffolding contract: Validates incoming request schema.
+    """Executes business validation and normalization on incoming investigation data.
 
-    Returns HTTP 501 Not Implemented pending database persistence in Phase 3.
+    Returns HTTP 501 Not Implemented pending database persistence in future phase.
     """
+    try:
+        # Execute business logic validation & normalization
+        validated_payload = investigation_service.validate_investigation_creation(payload)
+    except InvestigationError as err:
+        raise err
+
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Investigation database persistence will be implemented in Step 03 Phase 3.",
+        detail="Investigation database persistence will be implemented in Step 03 Phase 3; schema and business validation succeeded.",
     )
 
 
@@ -49,7 +57,7 @@ async def list_investigations(
     """Scaffolding contract: Returns HTTP 501 Not Implemented pending database integration."""
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Investigation query operations will be implemented in Step 03 Phase 3.",
+        detail="Investigation query operations will be implemented in future phase.",
     )
 
 
@@ -63,7 +71,7 @@ async def get_investigation(investigation_id: str):
     """Scaffolding contract: Returns HTTP 501 Not Implemented pending database integration."""
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail=f"Investigation retrieval for '{investigation_id}' will be implemented in Step 03 Phase 3.",
+        detail=f"Investigation retrieval for '{investigation_id}' will be implemented in future phase.",
     )
 
 
@@ -71,15 +79,23 @@ async def get_investigation(investigation_id: str):
     "/{investigation_id}",
     response_model=InvestigationResponse,
     summary="Update an existing investigation",
-    description="Applies partial updates to an active investigation record.",
+    description="Applies partial updates to an active investigation record following lifecycle transition rules.",
 )
 async def update_investigation(investigation_id: str, payload: InvestigationUpdate):
-    """Scaffolding contract: Validates update payload.
+    """Executes business validation on update fields and lifecycle transition.
 
-    Returns HTTP 501 Not Implemented pending database persistence in Phase 3.
+    Returns HTTP 501 Not Implemented pending database persistence.
     """
+    try:
+        # Validate status transition from Open (or existing state)
+        validated_update = investigation_service.validate_investigation_update(
+            current_status=InvestigationStatusEnum.OPEN,
+            update_data=payload,
+        )
+    except InvestigationError as err:
+        raise err
+
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail=f"Investigation update for '{investigation_id}' will be implemented in Step 03 Phase 3.",
+        detail=f"Investigation update for '{investigation_id}' will be implemented in future phase; update validation succeeded.",
     )
-

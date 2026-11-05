@@ -2,7 +2,9 @@
 
 from typing import List
 from fastapi import APIRouter, HTTPException, status
+from app.core.exceptions import CAPAError
 from app.schemas.capa import CAPACreate, CAPAResponse
+from app.services.capa_service import capa_service
 
 router = APIRouter(prefix="/investigations/{investigation_id}/capa", tags=["CAPA"])
 
@@ -12,16 +14,21 @@ router = APIRouter(prefix="/investigations/{investigation_id}/capa", tags=["CAPA
     response_model=CAPAResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Record a new CAPA action for an investigation",
-    description="Validates and associates a corrective or preventive remediation plan with an investigation.",
+    description="Validates and associates a corrective or preventive remediation plan with an investigation adhering to FDA/ICH approval gates.",
 )
 async def create_capa(investigation_id: str, payload: CAPACreate):
-    """Scaffolding contract: Validates CAPA proposal schema.
+    """Executes business validation on CAPA action proposals and prevents premature approval states.
 
     Returns HTTP 501 Not Implemented pending database persistence.
     """
+    try:
+        validated_capa = capa_service.validate_capa_creation(payload)
+    except CAPAError as err:
+        raise err
+
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail=f"CAPA persistence for investigation '{investigation_id}' will be implemented in Step 03 Phase 3.",
+        detail=f"CAPA persistence for investigation '{investigation_id}' will be implemented in future phase; action validation succeeded.",
     )
 
 
@@ -35,6 +42,5 @@ async def list_capa(investigation_id: str):
     """Scaffolding contract: Returns HTTP 501 Not Implemented pending database integration."""
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail=f"CAPA retrieval for investigation '{investigation_id}' will be implemented in Step 03 Phase 3.",
+        detail=f"CAPA retrieval for investigation '{investigation_id}' will be implemented in future phase.",
     )
-
