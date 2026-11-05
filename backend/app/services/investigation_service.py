@@ -4,19 +4,30 @@ Handles deviation validation, status transition rules, metadata preparation,
 and sanitization adhering to ICH Q9/Q10 quality risk management principles.
 """
 
+import math
 import random
+import uuid
 from datetime import datetime, timezone
 from typing import Optional, Set, Tuple
+from fastapi import HTTPException, status
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 from app.core.exceptions import (
     InvalidInvestigationDataError,
     InvalidStatusTransitionError,
 )
 from app.core.logging import get_logger
+from app.models.investigation import Investigation
+from app.repositories.activity_repository import activity_repository
+from app.repositories.investigation_repository import investigation_repository
+from app.schemas.common import PaginationMetadata
 from app.schemas.investigation import (
     InvestigationCreate,
+    InvestigationListResponse,
     InvestigationResponse,
     InvestigationStatusEnum,
     InvestigationUpdate,
+    SeverityEnum,
 )
 
 logger = get_logger("services.investigation")
@@ -185,6 +196,199 @@ class InvestigationService:
             created_at=now,
             updated_at=now,
         )
+
+
+    def to_investigation_response(self, inv: Investigation) -> InvestigationResponse:
+        """Serialize SQLAlchemy model to InvestigationResponse schema."""
+        return InvestigationResponse(
+            investigation_id=inv.investigation_number,
+            incident_title=inv.incident_title,
+            incident_description=inv.incident_description,
+            deviation_id=inv.deviation_id,
+            batch_number=inv.batch_number,
+            product_name=inv.product_name,
+            department=inv.department,
+            equipment=inv.equipment,
+            incident_date=inv.incident_date,
+            detection_date=inv.detection_date,
+            severity=inv.severity,
+            immediate_action_taken=inv.immediate_action_taken,
+            expected_condition=inv.expected_condition,
+            actual_condition=inv.actual_condition,
+            observed_impact=inv.observed_impact,
+            affected_process=inv.affected_process,
+            initial_observations=inv.initial_observations,
+            investigation_status=inv.investigation_status,
+            created_at=inv.created_at,
+            updated_at=inv.updated_at,
+        )
+
+    def generate_unique_investigation_number(self, db: Session) -> str:
+        """Generate a guaranteed unique human-readable tracking ID: INV-YYYY-XXXX."""
+        year = datetime.now(timezone.utc).year
+        for _ in range(100):
+            suffix = random.randint(1000, 9999)
+            candidate = f"INV-{year}-{suffix}"
+            if not investigation_repository.get_by_number(db, candidate):
+                return candidate
+        return f"INV-{year}-{uuid.uuid4().hex[:6].upper()}"
+
+    def create_investigation(
+        self,
+        db: Session,
+        payload: InvestigationCreate,
+    ) -> InvestigationResponse:
+        """Validate, persist in PostgreSQL, record activity, and return response."""
+        validated = self.validate_investigation_creation(payload)
+        inv_number = self.generate_unique_investigation_number(db)
+
+        inv_data = {
+            "investigation_number": inv_number,
+            "incident_title": validated.incident_title,
+            "incident_description": validated.incident_description,
+            "deviation_id": validated.deviation_id,
+            "batch_number": validated.batch_number,
+            "product_name": validated.product_name,
+            "department": validated.department,
+            "equipment": validated.equipment,
+            "incident_date": validated.incident_date,
+            "detection_date": validated.detection_date,
+            "severity": validated.severity,
+            "immediate_action_taken": validated.immediate_action_taken,
+            "expected_condition": validated.expected_condition,
+            "actual_condition": validated.actual_condition,
+            "observed_impact": validated.observed_impact,
+            "affected_process": validated.affected_process,
+            "initial_observations": validated.initial_observations,
+            "investigation_status": validated.investigation_status or InvestigationStatusEnum.OPEN,
+        }
+
+        try:
+            inv = investigation_repository.create(db, inv_data)
+            activity_repository.create(
+                db,
+                {
+                    "investigation_id": inv.id,
+                    "activity_type": "INVESTIGATION_CREATED",
+                    "description": f"Quality deviation {inv.investigation_number} registered: {inv.incident_title}",
+                    "actor_identifier": "System",
+                    "activity_metadata": {
+                        "severity": inv.severity.value,
+                        "department": inv.department,
+                        "batch_number": inv.batch_number,
+                    },
+                },
+            )
+            db.commit()
+            db.refresh(inv)
+            return self.to_investigation_response(inv)
+        except IntegrityError as err:
+            db.rollback()
+            logger.warning("Uniqueness conflict creating investigation: %s", err)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"An investigation with number '{inv_number}' or conflicting unique key already exists.",
+            )
+        except Exception:
+            db.rollback()
+            raise
+
+    def get_investigation(self, db: Session, identifier: str) -> InvestigationResponse:
+        """Retrieve an investigation by UUID or investigation_number, or 404."""
+        inv = investigation_repository.get_by_id(db, identifier)
+        if not inv:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Investigation '{identifier}' not found.",
+            )
+        return self.to_investigation_response(inv)
+
+    def list_investigations(
+        self,
+        db: Session,
+        page: int = 1,
+        limit: int = 20,
+        search: Optional[str] = None,
+        status_filter: Optional[InvestigationStatusEnum] = None,
+        severity: Optional[SeverityEnum] = None,
+        department: Optional[str] = None,
+    ) -> InvestigationListResponse:
+        """Query paginated investigations with full filtering support."""
+        items, total = investigation_repository.list_paginated(
+            db=db,
+            page=page,
+            page_size=limit,
+            search=search,
+            status=status_filter,
+            severity=severity,
+            department=department,
+        )
+        total_pages = math.ceil(total / limit) if limit > 0 else 0
+        has_next = page < total_pages
+        has_prev = page > 1
+
+        pagination = PaginationMetadata(
+            page=page,
+            limit=limit,
+            total=total,
+            total_pages=total_pages,
+            has_next=has_next,
+            has_prev=has_prev,
+        )
+
+        return InvestigationListResponse(
+            items=[self.to_investigation_response(i) for i in items],
+            pagination=pagination,
+        )
+
+    def update_investigation(
+        self,
+        db: Session,
+        identifier: str,
+        payload: InvestigationUpdate,
+    ) -> InvestigationResponse:
+        """Apply partial update to an existing investigation adhering to state machine transitions."""
+        inv = investigation_repository.get_by_id(db, identifier)
+        if not inv:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Investigation '{identifier}' not found.",
+            )
+
+        validated = self.validate_investigation_update(
+            current_status=inv.investigation_status,
+            update_data=payload,
+            existing_incident_date=inv.incident_date,
+            existing_detection_date=inv.detection_date,
+        )
+
+        update_dict = validated.model_dump(exclude_unset=True)
+        # If status changed to CLOSED, record closed_at
+        if (
+            "investigation_status" in update_dict
+            and update_dict["investigation_status"] == InvestigationStatusEnum.CLOSED
+            and inv.investigation_status != InvestigationStatusEnum.CLOSED
+        ):
+            update_dict["closed_at"] = datetime.now(timezone.utc)
+
+        try:
+            updated_inv = investigation_repository.update(db, inv, update_dict)
+            activity_repository.create(
+                db,
+                {
+                    "investigation_id": inv.id,
+                    "activity_type": "INVESTIGATION_UPDATED",
+                    "description": f"Investigation {inv.investigation_number} details updated.",
+                    "actor_identifier": "System",
+                    "activity_metadata": {"updated_fields": list(update_dict.keys())},
+                },
+            )
+            db.commit()
+            db.refresh(updated_inv)
+            return self.to_investigation_response(updated_inv)
+        except Exception:
+            db.rollback()
+            raise
 
 
 # Singleton service instance

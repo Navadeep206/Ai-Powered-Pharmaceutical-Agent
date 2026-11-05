@@ -36,9 +36,9 @@ class InvestigationActivity(Base):
         nullable=False,
         comment="Human-readable summary of the recorded action",
     )
-    actor_identifier: Mapped[str] = mapped_column(
+    actor_identifier: Mapped[Optional[str]] = mapped_column(
         String(100),
-        nullable=False,
+        nullable=True,
         default="System",
         comment="User ID, investigator username, or autonomous agent identifier",
     )
@@ -65,3 +65,4 @@ class InvestigationActivity(Base):
     __table_args__ = (
         Index("ix_activities_investigation_created", "investigation_id", "created_at"),
     )
+

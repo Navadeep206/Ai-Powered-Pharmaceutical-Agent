@@ -6,12 +6,17 @@ and human-in-the-loop verification boundaries adhering to ICH Q9 principles.
 
 from datetime import datetime, timezone
 from typing import List, Optional
+from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
 from app.core.exceptions import (
     InvalidFishboneCategoryError,
     InvalidFiveWhysStructureError,
     InvalidRCACauseStatusError,
 )
 from app.core.logging import get_logger
+from app.repositories.activity_repository import activity_repository
+from app.repositories.investigation_repository import investigation_repository
+from app.repositories.rca_repository import rca_repository
 from app.schemas.rca import (
     CauseVerificationStatusEnum,
     FishboneCategoryEnum,
@@ -129,6 +134,115 @@ class RCAService:
             fishbone_causes=validated_rca.fishbone_causes,
             investigator_notes=validated_rca.investigator_notes,
             updated_at=datetime.now(timezone.utc),
+        )
+
+
+    def save_rca_analysis(
+        self,
+        db: Session,
+        investigation_id: str,
+        payload: RCARequest,
+    ) -> RCAResponse:
+        """Validate, persist in transaction, record activity, and return RCA response."""
+        inv = investigation_repository.get_by_id(db, investigation_id)
+        if not inv:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Investigation '{investigation_id}' not found.",
+            )
+
+        validated_rca = self.validate_rca_request(payload)
+
+        # Convert schemas to dicts for repository
+        five_whys_dicts = [item.model_dump() for item in validated_rca.five_whys]
+        fishbone_dicts = [item.model_dump() for item in validated_rca.fishbone_causes]
+
+        try:
+            analysis = rca_repository.save_rca_study(
+                db=db,
+                investigation_id=inv.id,
+                analysis_method="COMBINED",
+                summary=validated_rca.investigator_notes,
+                five_whys_items=five_whys_dicts,
+                fishbone_items=fishbone_dicts,
+            )
+            activity_repository.create(
+                db,
+                {
+                    "investigation_id": inv.id,
+                    "activity_type": "RCA_ANALYSIS_SAVED",
+                    "description": f"RCA analysis updated for {inv.investigation_number} ({len(five_whys_dicts)} Whys, {len(fishbone_dicts)} Fishbone causes).",
+                    "actor_identifier": "System",
+                    "activity_metadata": {
+                        "whys_count": len(five_whys_dicts),
+                        "fishbone_count": len(fishbone_dicts),
+                    },
+                },
+            )
+            db.commit()
+            db.refresh(analysis)
+            return self.to_rca_response(inv.investigation_number, analysis)
+        except Exception:
+            db.rollback()
+            raise
+
+    def get_rca_analysis(
+        self,
+        db: Session,
+        investigation_id: str,
+    ) -> RCAResponse:
+        """Retrieve the latest RCA analysis for an investigation, or return empty structure if none."""
+        inv = investigation_repository.get_by_id(db, investigation_id)
+        if not inv:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Investigation '{investigation_id}' not found.",
+            )
+
+        analysis = rca_repository.get_latest_by_investigation(db, inv.id)
+        if not analysis:
+            return RCAResponse(
+                investigation_id=inv.investigation_number,
+                five_whys=[],
+                fishbone_causes=[],
+                investigator_notes=None,
+                updated_at=inv.updated_at,
+            )
+
+        return self.to_rca_response(inv.investigation_number, analysis)
+
+    def to_rca_response(self, investigation_number: str, analysis) -> RCAResponse:
+        """Convert ORM RCAAnalysis to RCAResponse schema."""
+        five_whys = [
+            FiveWhysLevel(
+                level=w.why_number,
+                question=w.question,
+                answer=w.answer,
+                evidence_references=w.supporting_evidence_references or [],
+                is_root_cause=w.is_root_cause,
+                status=w.review_status,
+            )
+            for w in sorted(analysis.five_whys, key=lambda x: x.why_number)
+        ]
+
+        fishbone_causes = [
+            FishboneCause(
+                cause_id=f"CAUSE-{idx+1:02d}",
+                category=c.category,
+                cause_description=c.cause_description,
+                evidence_references=c.evidence_references or [],
+                status=c.review_status,
+                contributing_factors=[],
+            )
+            for idx, c in enumerate(analysis.fishbone_causes)
+        ]
+
+        return RCAResponse(
+            investigation_id=investigation_number,
+            five_whys=five_whys,
+            fishbone_causes=fishbone_causes,
+            investigator_notes=analysis.summary,
+            updated_at=analysis.updated_at,
         )
 
 

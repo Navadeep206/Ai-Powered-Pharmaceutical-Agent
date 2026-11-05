@@ -1,7 +1,10 @@
 """Document upload and incident intake route definitions."""
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from typing import Optional
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from sqlalchemy.orm import Session
 from app.core.exceptions import DocumentProcessingError, IncidentIntakeError
+from app.database.session import get_db
 from app.schemas.document import (
     DocumentAnalysisRequest,
     DocumentExtractionResult,
@@ -18,10 +21,17 @@ router = APIRouter(prefix="/documents", tags=["Documents"])
     response_model=DocumentExtractionResult,
     status_code=status.HTTP_201_CREATED,
     summary="Upload and extract text from an incident PDF",
-    description="Validates multipart PDF file structure, extracts text page-by-page, and detects scanned pages requiring OCR.",
+    description="Validates multipart PDF file structure, extracts text page-by-page, and detects scanned pages requiring OCR. If investigation_id is provided, persists metadata in PostgreSQL.",
 )
-async def upload_document(file: UploadFile = File(...)):
-    """Validates PDF file, extracts text in-memory, and detects OCR necessity without permanent storage."""
+async def upload_document(
+    file: UploadFile = File(...),
+    investigation_id: Optional[str] = Query(
+        default=None,
+        description="Optional investigation ID to associate document metadata with in PostgreSQL",
+    ),
+    db: Session = Depends(get_db),
+):
+    """Validates PDF file, extracts text in-memory, and conditionally records metadata in PostgreSQL."""
     # Check basic file extension
     filename = file.filename or ""
     if not filename.lower().endswith(".pdf") and file.content_type != "application/pdf":
@@ -36,6 +46,15 @@ async def upload_document(file: UploadFile = File(...)):
             file_bytes=file_bytes,
             filename=filename,
         )
+
+        # Conditionally persist metadata in PostgreSQL if investigation_id is provided
+        if investigation_id:
+            document_service.persist_document_metadata(
+                db=db,
+                extraction=extraction_result,
+                investigation_id=investigation_id,
+            )
+
         return extraction_result
     except DocumentProcessingError as err:
         # DocumentProcessingError subclasses are mapped by global error handler,

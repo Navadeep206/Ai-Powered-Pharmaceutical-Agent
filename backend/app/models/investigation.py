@@ -99,3 +99,4 @@ class Investigation(Base):
         Index("ix_investigations_dept_status", "department", "investigation_status"),
         Index("ix_investigations_created_at", "created_at"),
     )
+

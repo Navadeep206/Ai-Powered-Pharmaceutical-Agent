@@ -17,6 +17,7 @@ from app.api.routes import (
     rca,
     evidence,
     capa,
+    dashboard,
 )
 
 api_router = APIRouter(prefix="/api")
@@ -28,5 +29,6 @@ api_router.include_router(documents.router)
 api_router.include_router(rca.router)
 api_router.include_router(evidence.router)
 api_router.include_router(capa.router)
+api_router.include_router(dashboard.router)
 
 __all__ = ["api_router"]

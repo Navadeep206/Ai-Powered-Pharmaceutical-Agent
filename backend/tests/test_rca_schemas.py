@@ -104,29 +104,66 @@ def test_valid_rca_request_payload():
     assert req.five_whys[1].is_root_cause is True
 
 
-# --- RCA Endpoint Route Scaffolding Tests ---
+# --- RCA Endpoint Route Integration Tests ---
 
 
 def test_post_rca_endpoint():
-    """Verify POST /api/investigations/{id}/rca returns HTTP 501 Not Implemented."""
-    payload = {
+    """Verify POST /api/investigations/{id}/rca persists RCA study in PostgreSQL."""
+    # First create an investigation to attach to
+    inv_payload = {
+        "incident_title": "Reaction yield dropped below validated lower threshold",
+        "incident_description": "Batch yields declined from 94 percent to 76 percent across three runs.",
+        "severity": "High",
+        "department": "Synthesis",
+    }
+    inv_res = client.post("/api/investigations", json=inv_payload)
+    assert inv_res.status_code == 201
+    inv_id = inv_res.json()["investigation_id"]
+
+    rca_payload = {
         "five_whys": [
             {
                 "level": 1,
                 "question": "Why did reaction stall?",
                 "answer": "Agitator stopped rotating.",
+                "is_root_cause": True,
             }
         ],
-        "fishbone_causes": [],
+        "fishbone_causes": [
+            {
+                "cause_id": "CAUSE-01",
+                "category": "Machine",
+                "cause_description": "Drive motor tripped due to mechanical jam in seal assembly.",
+                "evidence_references": [],
+                "status": "AI Suggestion",
+            }
+        ],
+        "investigator_notes": "Initial causal evaluation completed.",
     }
-    response = client.post("/api/investigations/INV-2026-001/rca", json=payload)
-    assert response.status_code == 501
-    assert "INV-2026-001" in response.json()["message"]
+    response = client.post(f"/api/investigations/{inv_id}/rca", json=rca_payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["investigation_id"] == inv_id
+    assert len(data["five_whys"]) == 1
+    assert data["five_whys"][0]["question"] == "Why did reaction stall?"
+    assert len(data["fishbone_causes"]) == 1
 
 
 def test_get_rca_endpoint():
-    """Verify GET /api/investigations/{id}/rca returns HTTP 501 Not Implemented."""
-    response = client.get("/api/investigations/INV-2026-001/rca")
-    assert response.status_code == 501
-    assert "INV-2026-001" in response.json()["message"]
+    """Verify GET /api/investigations/{id}/rca returns persisted RCA analysis."""
+    # Create investigation
+    inv_payload = {
+        "incident_title": "Chromatography peak splitting observation",
+        "incident_description": "HPLC retention time shifted 2.4 minutes earlier than validated window.",
+        "severity": "Medium",
+        "department": "Quality Assurance",
+    }
+    inv_res = client.post("/api/investigations", json=inv_payload)
+    inv_id = inv_res.json()["investigation_id"]
+
+    # Retrieve before saving: returns empty structure
+    get_res = client.get(f"/api/investigations/{inv_id}/rca")
+    assert get_res.status_code == 200
+    assert get_res.json()["investigation_id"] == inv_id
+    assert get_res.json()["five_whys"] == []
 

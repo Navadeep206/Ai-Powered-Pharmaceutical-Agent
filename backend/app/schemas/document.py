@@ -60,6 +60,20 @@ class DocumentUploadResponse(DocumentExtractionResult):
     pass
 
 
+class DocumentMetadataResponse(BaseModel):
+    """Persistent metadata record for a document associated with an investigation."""
+
+    document_id: str = Field(..., description="Unique document record UUID")
+    investigation_id: Optional[str] = Field(default=None, description="Associated investigation ID")
+    original_filename: str = Field(..., description="Client original filename")
+    content_type: str = Field(..., description="MIME content type")
+    file_size_bytes: int = Field(..., description="Document size in bytes")
+    number_of_pages: int = Field(..., description="Number of pages")
+    source_type: IntakeMethodEnum = Field(..., description="Intake source modality")
+    extraction_status: str = Field(..., description="Extraction outcome")
+    created_at: datetime = Field(..., description="Timestamp when document was recorded")
+
+
 class TextIncidentInput(BaseModel):
     """Intake schema for raw pasted incident descriptions."""
 

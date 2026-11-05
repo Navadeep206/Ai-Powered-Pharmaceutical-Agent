@@ -68,3 +68,4 @@ class Document(Base):
         "Investigation",
         back_populates="documents",
     )
+

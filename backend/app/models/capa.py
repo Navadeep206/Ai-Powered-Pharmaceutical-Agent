@@ -97,3 +97,4 @@ class CapaAction(Base):
         Index("ix_capa_investigation_status", "investigation_id", "action_status"),
         Index("ix_capa_target_date", "target_date"),
     )
+

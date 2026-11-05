@@ -74,3 +74,4 @@ class Evidence(Base):
     __table_args__ = (
         Index("ix_evidence_investigation_type", "investigation_id", "evidence_type"),
     )
+

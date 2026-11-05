@@ -6,6 +6,7 @@ from app.api.routes.documents import router as documents_router
 from app.api.routes.rca import router as rca_router
 from app.api.routes.evidence import router as evidence_router
 from app.api.routes.capa import router as capa_router
+from app.api.routes.dashboard import router as dashboard_router
 
 __all__ = [
     "health_router",
@@ -14,4 +15,5 @@ __all__ = [
     "rca_router",
     "evidence_router",
     "capa_router",
+    "dashboard_router",
 ]

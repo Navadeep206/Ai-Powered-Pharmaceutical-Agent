@@ -63,24 +63,56 @@ def test_short_description_rejection():
         )
 
 
-# --- Evidence Endpoint Tests ---
+# --- Evidence Endpoint Integration Tests ---
 
 
 def test_post_evidence_endpoint():
-    """Verify POST /api/investigations/{id}/evidence returns HTTP 501 Not Implemented."""
+    """Verify POST /api/investigations/{id}/evidence persists evidence in PostgreSQL."""
+    inv_payload = {
+        "incident_title": "Cooling loop temperature runaway incident",
+        "incident_description": "Secondary chilling circuit failed to maintain brine supply below -15C.",
+        "severity": "High",
+        "department": "Utilities",
+    }
+    inv_res = client.post("/api/investigations", json=inv_payload)
+    inv_id = inv_res.json()["investigation_id"]
+
     payload = {
         "description": "Temperature probe calibration record Cal-2026-09 confirms probe was within spec.",
         "evidence_type": "Supporting",
         "source_reference": "QC-CAL-2026-09",
     }
-    response = client.post("/api/investigations/INV-2026-001/evidence", json=payload)
-    assert response.status_code == 501
-    assert "INV-2026-001" in response.json()["message"]
+    response = client.post(f"/api/investigations/{inv_id}/evidence", json=payload)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["investigation_id"] == inv_id
+    assert data["evidence_type"] == "Supporting"
+    assert data["source_reference"] == "QC-CAL-2026-09"
 
 
 def test_list_evidence_endpoint():
-    """Verify GET /api/investigations/{id}/evidence returns HTTP 501 Not Implemented."""
-    response = client.get("/api/investigations/INV-2026-001/evidence")
-    assert response.status_code == 501
-    assert "INV-2026-001" in response.json()["message"]
+    """Verify GET /api/investigations/{id}/evidence returns persisted evidence items."""
+    inv_payload = {
+        "incident_title": "Centrifuge imbalance shutdown during cake wash",
+        "incident_description": "Excess vibration detected on bearing B2 during solvent decanting cycle.",
+        "severity": "Medium",
+        "department": "Purification",
+    }
+    inv_res = client.post("/api/investigations", json=inv_payload)
+    inv_id = inv_res.json()["investigation_id"]
+
+    # Post an evidence item
+    ev_payload = {
+        "description": "Vibration sensor telemetry recorded 8.4 mm/s at 14:02 UTC.",
+        "evidence_type": "Contradictory",
+        "source_reference": "SCADA-VIB-LOG-04",
+    }
+    client.post(f"/api/investigations/{inv_id}/evidence", json=ev_payload)
+
+    response = client.get(f"/api/investigations/{inv_id}/evidence")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert len(data) >= 1
+    assert data[0]["source_reference"] == "SCADA-VIB-LOG-04"
 

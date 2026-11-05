@@ -30,6 +30,7 @@ from app.schemas.document import (
     PageExtractionResult,
     DocumentExtractionResult,
     DocumentUploadResponse,
+    DocumentMetadataResponse,
     TextIncidentInput,
     EmailIncidentInput,
     DocumentAnalysisRequest,
@@ -60,6 +61,10 @@ from app.schemas.capa import (
     CAPAStatusEnum,
     CAPACreate,
     CAPAResponse,
+    CAPAStatusUpdate,
+)
+from app.schemas.dashboard import (
+    DashboardSummaryResponse,
 )
 
 __all__ = [
@@ -82,6 +87,7 @@ __all__ = [
     "PageExtractionResult",
     "DocumentExtractionResult",
     "DocumentUploadResponse",
+    "DocumentMetadataResponse",
     "TextIncidentInput",
     "EmailIncidentInput",
     "DocumentAnalysisRequest",
@@ -108,4 +114,7 @@ __all__ = [
     "CAPAStatusEnum",
     "CAPACreate",
     "CAPAResponse",
+    "CAPAStatusUpdate",
+    # Dashboard
+    "DashboardSummaryResponse",
 ]

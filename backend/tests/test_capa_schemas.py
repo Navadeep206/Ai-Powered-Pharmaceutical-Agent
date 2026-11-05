@@ -67,11 +67,20 @@ def test_missing_required_capa_fields():
     assert "effectiveness_verification_method" in missing_fields
 
 
-# --- CAPA Endpoint Tests ---
+# --- CAPA Endpoint Integration Tests ---
 
 
 def test_post_capa_endpoint():
-    """Verify POST /api/investigations/{id}/capa returns HTTP 501 Not Implemented."""
+    """Verify POST /api/investigations/{id}/capa persists CAPA in PostgreSQL."""
+    inv_payload = {
+        "incident_title": "Filter membrane breakthrough excursion",
+        "incident_description": "Particulate counts downstream of 0.22 um filter exceeded class A limit.",
+        "severity": "Critical",
+        "department": "Sterile Fill",
+    }
+    inv_res = client.post("/api/investigations", json=inv_payload)
+    inv_id = inv_res.json()["investigation_id"]
+
     payload = {
         "action_type": "Corrective Action",
         "description": "Recalibrate dual temperature transmitters TT-102A and TT-102B against traceable standard.",
@@ -79,13 +88,37 @@ def test_post_capa_endpoint():
         "target_date": "2026-11-10",
         "effectiveness_verification_method": "Verify five-point calibration linearity with tolerance <= ±0.1°C.",
     }
-    response = client.post("/api/investigations/INV-2026-001/capa", json=payload)
-    assert response.status_code == 501
-    assert "INV-2026-001" in response.json()["message"]
+    response = client.post(f"/api/investigations/{inv_id}/capa", json=payload)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["investigation_id"] == inv_id
+    assert data["action_owner"] == "Instrumentation Supervisor"
+    assert data["status"] == "Draft"
 
 
 def test_list_capa_endpoint():
-    """Verify GET /api/investigations/{id}/capa returns HTTP 501 Not Implemented."""
-    response = client.get("/api/investigations/INV-2026-001/capa")
-    assert response.status_code == 501
-    assert "INV-2026-001" in response.json()["message"]
+    """Verify GET /api/investigations/{id}/capa returns persisted actions."""
+    inv_payload = {
+        "incident_title": "Packaging line blister seal integrity defect",
+        "incident_description": "Leak test failures detected in 3 blisters out of 50 sampled during run.",
+        "severity": "High",
+        "department": "Packaging",
+    }
+    inv_res = client.post("/api/investigations", json=inv_payload)
+    inv_id = inv_res.json()["investigation_id"]
+
+    payload = {
+        "action_type": "Preventive Action",
+        "description": "Replace sealing heater cartridge elements and install thermal imaging sensor.",
+        "action_owner": "Packaging Maintenance Lead",
+        "target_date": "2026-12-15",
+        "effectiveness_verification_method": "Execute dye penetration leak testing across 10 consecutive packaging batches.",
+    }
+    client.post(f"/api/investigations/{inv_id}/capa", json=payload)
+
+    response = client.get(f"/api/investigations/{inv_id}/capa")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert len(data) >= 1
+    assert data[0]["action_owner"] == "Packaging Maintenance Lead"

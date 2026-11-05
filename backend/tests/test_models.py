@@ -339,3 +339,4 @@ def test_investigation_number_uniqueness(db_session):
     with pytest.raises(IntegrityError):
         db_session.commit()
     db_session.rollback()
+

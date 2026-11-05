@@ -18,10 +18,19 @@ class CAPAStatusEnum(str, Enum):
 
     DRAFT = "Draft"
     PROPOSED = "Proposed"
+    PENDING_REVIEW = "Pending Review"
     APPROVED = "Approved"
     IN_PROGRESS = "In Progress"
     COMPLETED = "Completed"
+    REJECTED = "Rejected"
     CLOSED = "Closed"
+
+
+class CAPAStatusUpdate(BaseModel):
+    """Payload to update the lifecycle status of an existing CAPA action."""
+
+    status: CAPAStatusEnum = Field(..., description="Target lifecycle state")
+    notes: Optional[str] = Field(default=None, description="Optional reviewer rationale or verification notes")
 
 
 class CAPACreate(BaseModel):

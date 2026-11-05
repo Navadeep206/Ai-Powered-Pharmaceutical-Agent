@@ -99,11 +99,11 @@ def test_investigation_update_partial_fields():
     assert update.incident_title is None
 
 
-# --- Endpoint Route Scaffolding Tests ---
+# --- Endpoint Route Integration Tests ---
 
 
 def test_create_investigation_endpoint_valid_payload():
-    """Verify POST /api/investigations with valid payload returns HTTP 501 Not Implemented."""
+    """Verify POST /api/investigations with valid payload persists and returns HTTP 201 Created."""
     payload = {
         "incident_title": "Unexpected pressure drop in filter dryer FD-04",
         "incident_description": "Nitrogen purge pressure dropped from 3.0 bar to 1.1 bar during drying.",
@@ -111,8 +111,11 @@ def test_create_investigation_endpoint_valid_payload():
         "department": "Purification",
     }
     response = client.post("/api/investigations", json=payload)
-    assert response.status_code == 501
-    assert "Step 03 Phase 3" in response.json()["message"]
+    assert response.status_code == 201
+    data = response.json()
+    assert data["incident_title"] == payload["incident_title"]
+    assert data["investigation_id"].startswith("INV-")
+    assert data["investigation_status"] == "Open"
 
 
 def test_create_investigation_endpoint_validation_error():
@@ -125,22 +128,58 @@ def test_create_investigation_endpoint_validation_error():
 
 
 def test_list_investigations_endpoint():
-    """Verify GET /api/investigations returns HTTP 501 Not Implemented."""
+    """Verify GET /api/investigations returns HTTP 200 with paginated items."""
     response = client.get("/api/investigations")
-    assert response.status_code == 501
-    assert "query operations" in response.json()["message"]
+    assert response.status_code == 200
+    data = response.json()
+    assert "items" in data
+    assert "pagination" in data
+    assert data["pagination"]["page"] == 1
 
 
 def test_get_investigation_by_id_endpoint():
-    """Verify GET /api/investigations/{id} returns HTTP 501 Not Implemented."""
-    response = client.get("/api/investigations/INV-2026-001")
-    assert response.status_code == 501
-    assert "INV-2026-001" in response.json()["message"]
+    """Verify GET /api/investigations/{id} returns HTTP 200 for created record and 404 for unknown."""
+    # Create an investigation first
+    create_payload = {
+        "incident_title": "Temperature anomaly in reactor R-201",
+        "incident_description": "Exothermic spike exceeded 65C during slow reagent addition step.",
+        "severity": "Critical",
+        "department": "Synthesis",
+    }
+    create_res = client.post("/api/investigations", json=create_payload)
+    assert create_res.status_code == 201
+    inv_id = create_res.json()["investigation_id"]
+
+    # Retrieve by ID
+    get_res = client.get(f"/api/investigations/{inv_id}")
+    assert get_res.status_code == 200
+    assert get_res.json()["investigation_id"] == inv_id
+
+    # Retrieve non-existent
+    unknown_res = client.get("/api/investigations/INV-UNKNOWN-9999")
+    assert unknown_res.status_code == 404
 
 
 def test_patch_investigation_endpoint():
-    """Verify PATCH /api/investigations/{id} returns HTTP 501 Not Implemented."""
-    payload = {"severity": "Low"}
-    response = client.patch("/api/investigations/INV-2026-001", json=payload)
-    assert response.status_code == 501
+    """Verify PATCH /api/investigations/{id} applies partial update."""
+    create_payload = {
+        "incident_title": "Agitator speed deviation in crystallizer CR-01",
+        "incident_description": "Impeller RPM dropped from 120 to 45 due to electrical surge.",
+        "severity": "Medium",
+        "department": "Crystallization",
+    }
+    create_res = client.post("/api/investigations", json=create_payload)
+    assert create_res.status_code == 201
+    inv_id = create_res.json()["investigation_id"]
+
+    # Patch with valid transition to Under Investigation
+    patch_payload = {
+        "investigation_status": "Under Investigation",
+        "observed_impact": "Crystal size distribution was broadened but within release spec.",
+    }
+    patch_res = client.patch(f"/api/investigations/{inv_id}", json=patch_payload)
+    assert patch_res.status_code == 200
+    data = patch_res.json()
+    assert data["investigation_status"] == "Under Investigation"
+    assert data["observed_impact"] == patch_payload["observed_impact"]
 

@@ -8,9 +8,10 @@ import io
 import os
 import re
 import uuid
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 import pypdf
 from pypdf.errors import PdfReadError, PdfStreamError
+from sqlalchemy.orm import Session
 from app.core.exceptions import (
     CorruptedPDFError,
     EmptyDocumentError,
@@ -19,7 +20,11 @@ from app.core.exceptions import (
     PasswordProtectedPDFError,
 )
 from app.core.logging import get_logger
-from app.schemas.document import DocumentExtractionResult, PageExtractionResult
+from app.models.document import Document
+from app.repositories.activity_repository import activity_repository
+from app.repositories.document_repository import document_repository
+from app.repositories.investigation_repository import investigation_repository
+from app.schemas.document import DocumentExtractionResult, IntakeMethodEnum, PageExtractionResult
 
 logger = get_logger("services.document")
 
@@ -212,6 +217,73 @@ class DocumentService:
             extraction_status,
         )
         return doc_result
+
+    def persist_document_metadata(
+        self,
+        db: Session,
+        extraction: DocumentExtractionResult,
+        investigation_id: Optional[Union[uuid.UUID, str]] = None,
+        source_type: IntakeMethodEnum = IntakeMethodEnum.DOCUMENT,
+    ) -> Optional[Document]:
+        """Persist extraction metadata in PostgreSQL if linked to an investigation.
+        
+        Crucial: Raw PDF binary is never stored; only structural metadata and extracted text.
+        """
+        if not investigation_id:
+            # Standalone document processing run: no database association
+            return None
+
+        inv = investigation_repository.get_by_id(db, investigation_id)
+        if not inv:
+            logger.warning("Attempted to associate document with non-existent investigation '%s'", investigation_id)
+            return None
+
+        doc_data = {
+            "investigation_id": inv.id,
+            "original_filename": extraction.original_filename,
+            "content_type": "application/pdf",
+            "file_size": extraction.file_size_bytes,
+            "page_count": extraction.number_of_pages,
+            "source_type": source_type,
+            "extraction_status": extraction.extraction_status,
+            "extracted_text": extraction.extracted_text,
+            "page_metadata": [p.model_dump() for p in extraction.page_wise_content],
+        }
+
+        try:
+            doc = document_repository.create(db, doc_data)
+            activity_repository.create(
+                db,
+                {
+                    "investigation_id": inv.id,
+                    "activity_type": "DOCUMENT_ATTACHED",
+                    "description": f"Incident document metadata recorded: {extraction.original_filename} ({extraction.number_of_pages} pages).",
+                    "actor_identifier": "System",
+                    "activity_metadata": {
+                        "document_id": str(doc.id),
+                        "filename": extraction.original_filename,
+                        "pages": extraction.number_of_pages,
+                        "status": extraction.extraction_status,
+                    },
+                },
+            )
+            db.commit()
+            db.refresh(doc)
+            return doc
+        except Exception:
+            db.rollback()
+            raise
+
+    def list_investigation_documents(
+        self,
+        db: Session,
+        investigation_id: Union[uuid.UUID, str],
+    ) -> List[Document]:
+        """Fetch metadata for all documents linked to an investigation."""
+        inv = investigation_repository.get_by_id(db, investigation_id)
+        if not inv:
+            return []
+        return document_repository.list_by_investigation(db, inv.id)
 
 
 # Singleton service instance
