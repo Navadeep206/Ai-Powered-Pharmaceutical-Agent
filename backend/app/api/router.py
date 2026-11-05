@@ -29,6 +29,7 @@ api_router.include_router(documents.router)
 api_router.include_router(rca.router)
 api_router.include_router(evidence.router)
 api_router.include_router(capa.router)
+api_router.include_router(capa.global_router)
 api_router.include_router(dashboard.router)
 
 __all__ = ["api_router"]

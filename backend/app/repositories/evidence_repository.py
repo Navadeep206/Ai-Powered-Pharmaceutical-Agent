@@ -41,6 +41,14 @@ class EvidenceRepository:
         stmt = select(Evidence).where(Evidence.investigation_id == investigation_id).order_by(Evidence.created_at.desc())
         return list(db.scalars(stmt).all())
 
+    def update(self, db: Session, evidence: Evidence, update_data: dict) -> Evidence:
+        """Update fields on an existing evidence record."""
+        for field, value in update_data.items():
+            if hasattr(evidence, field) and value is not None:
+                setattr(evidence, field, value)
+        db.flush()
+        return evidence
+
 
 # Singleton instance
 evidence_repository = EvidenceRepository()

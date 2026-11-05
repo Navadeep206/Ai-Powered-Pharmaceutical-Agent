@@ -66,53 +66,63 @@ export default function RecentInvestigations({ investigations = [], loading = fa
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#F1F5F9] bg-white">
-                {recentRecords.map((inv) => (
-                  <tr
-                    key={inv.id}
-                    className="hover:bg-[#F8FAFC] transition-colors duration-150"
-                  >
-                    <td className="px-5 py-3.5 font-mono text-xs font-bold text-[#142B45]">
-                      <span className="bg-[#F1F5F9] px-2 py-0.5 rounded border border-[#E2E8F0]">
-                        {inv.id}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3.5 max-w-xs">
-                      <div className="font-medium text-[#142B45] truncate" title={inv.title}>
-                        {inv.title}
-                      </div>
-                      <div className="text-xs text-[#64748B]">Batch: {inv.batch || 'N/A'}</div>
-                    </td>
-                    <td className="px-5 py-3.5 text-xs text-[#475569]">
-                      {inv.department || 'General'}
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <StatusBadge
-                        variant={SEVERITY_BADGE_MAP[inv.severity] || 'neutral'}
-                        size="sm"
-                      >
-                        {inv.severity}
-                      </StatusBadge>
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <StatusBadge
-                        variant={STATUS_BADGE_MAP[inv.status] || 'neutral'}
-                        size="sm"
-                      >
-                        {inv.status}
-                      </StatusBadge>
-                    </td>
-                    <td className="px-5 py-3.5 text-xs text-[#64748B] whitespace-nowrap">
-                      {inv.date || 'N/A'}
-                    </td>
-                    <td className="px-5 py-3.5 text-right whitespace-nowrap">
-                      <Link to={`/investigations/${encodeURIComponent(inv.id)}`}>
-                        <Button variant="ghost" size="xs" rightIcon={ExternalLink}>
-                          Open
-                        </Button>
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
+                {recentRecords.map((inv, idx) => {
+                  const invId = inv.id || inv.investigation_id || inv.investigation_number || `INV-${idx}`;
+                  const invTitle = inv.title || inv.incident_title || 'Untitled Deviation';
+                  const invBatch = inv.batch || inv.batch_number || 'N/A';
+                  const invDept = inv.department || 'General';
+                  const invSev = inv.severity || 'Medium';
+                  const invStat = inv.status || inv.investigation_status || 'Open';
+                  const invDate = inv.date || (inv.created_at ? String(inv.created_at).split('T')[0] : 'N/A');
+
+                  return (
+                    <tr
+                      key={invId}
+                      className="hover:bg-[#F8FAFC] transition-colors duration-150"
+                    >
+                      <td className="px-5 py-3.5 font-mono text-xs font-bold text-[#142B45]">
+                        <span className="bg-[#F1F5F9] px-2 py-0.5 rounded border border-[#E2E8F0]">
+                          {invId}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5 max-w-xs">
+                        <div className="font-medium text-[#142B45] truncate" title={invTitle}>
+                          {invTitle}
+                        </div>
+                        <div className="text-xs text-[#64748B]">Batch: {invBatch}</div>
+                      </td>
+                      <td className="px-5 py-3.5 text-xs text-[#475569]">
+                        {invDept}
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <StatusBadge
+                          variant={SEVERITY_BADGE_MAP[invSev] || 'neutral'}
+                          size="sm"
+                        >
+                          {invSev}
+                        </StatusBadge>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <StatusBadge
+                          variant={STATUS_BADGE_MAP[invStat] || 'neutral'}
+                          size="sm"
+                        >
+                          {invStat}
+                        </StatusBadge>
+                      </td>
+                      <td className="px-5 py-3.5 text-xs text-[#64748B] whitespace-nowrap">
+                        {invDate}
+                      </td>
+                      <td className="px-5 py-3.5 text-right whitespace-nowrap">
+                        <Link to={`/investigations/${encodeURIComponent(invId)}`}>
+                          <Button variant="ghost" size="xs" rightIcon={ExternalLink}>
+                            Open
+                          </Button>
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

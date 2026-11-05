@@ -24,6 +24,8 @@ import FiveWhysAnalysis from '../components/investigation/FiveWhysAnalysis';
 import FishboneAnalysis from '../components/investigation/FishboneAnalysis';
 import EvidenceList from '../components/investigation/EvidenceList';
 import CAPAForm from '../components/investigation/CAPAForm';
+import CAPAManagementPage from '../pages/CAPAManagement';
+import Sidebar from '../components/layout/Sidebar';
 import StatusDistribution from '../components/dashboard/StatusDistribution';
 import RecentInvestigations from '../components/dashboard/RecentInvestigations';
 import RecentActivity from '../components/dashboard/RecentActivity';
@@ -681,6 +683,57 @@ describe('Frontend Component Integration Tests', () => {
       const proposeBtn = screen.getByRole('button', { name: /propose action/i });
       fireEvent.click(proposeBtn);
       expect(screen.getByText(/Propose New CAPA Remediation Action/i)).toBeDefined();
+    });
+  });
+
+  describe('CAPAManagementPage Integration', () => {
+    it('fetches and renders live CAPA portfolio and KPI statistics', async () => {
+      const mockCapas = [
+        {
+          action_id: 'CAPA-2026-001',
+          description: 'Automated nitrogen purge validation protocol',
+          action_type: 'Preventive Action',
+          investigation_id: 'INV-2026-001',
+          action_owner: 'Validation Lead',
+          target_date: '2026-12-10',
+          status: 'In Progress',
+          effectiveness_verification_method: '3 consecutive purge cycle alarms verified',
+        },
+      ];
+
+      vi.spyOn(capaService, 'listAllCAPA').mockResolvedValue(mockCapas);
+
+      render(
+        <MemoryRouter>
+          <CAPAManagementPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Automated nitrogen purge validation protocol')).toBeDefined();
+        expect(screen.getByText('CAPA-2026-001')).toBeDefined();
+        expect(screen.getByText('Validation Lead')).toBeDefined();
+      });
+    });
+  });
+
+  describe('Sidebar Dynamic Badge Component', () => {
+    it('displays dynamic open investigations count instead of hardcoded badge', () => {
+      const store = createMockStore({
+        dashboard: {
+          summary: { open_investigations: 7 },
+        },
+      });
+
+      render(
+        <Provider store={store}>
+          <MemoryRouter>
+            <Sidebar />
+          </MemoryRouter>
+        </Provider>
+      );
+
+      expect(screen.getAllByText('7 Active').length).toBeGreaterThanOrEqual(1);
     });
   });
 });

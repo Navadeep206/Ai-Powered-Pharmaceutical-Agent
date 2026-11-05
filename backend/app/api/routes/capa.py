@@ -16,6 +16,30 @@ from app.schemas.capa import (
 from app.services.capa_service import capa_service
 
 router = APIRouter(prefix="/investigations/{investigation_id}/capa", tags=["CAPA"])
+global_router = APIRouter(prefix="/capa", tags=["CAPA"])
+
+
+@global_router.get(
+    "",
+    response_model=List[CAPAResponse],
+    summary="List all CAPA actions across investigations",
+    description="Retrieves enterprise portfolio of CAPA actions across investigations with optional status and search filtering.",
+)
+async def list_all_capas(
+    limit: int = 50,
+    offset: int = 0,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Retrieves all corrective and preventive actions from PostgreSQL."""
+    return capa_service.list_all_capa(
+        db=db,
+        limit=limit,
+        offset=offset,
+        status=status,
+        search=search,
+    )
 
 
 @router.post(

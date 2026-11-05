@@ -41,6 +41,36 @@ class CAPARepository:
         stmt = select(CapaAction).where(CapaAction.investigation_id == investigation_id).order_by(CapaAction.created_at.desc())
         return list(db.scalars(stmt).all())
 
+    def list_all(
+        self,
+        db: Session,
+        limit: int = 50,
+        offset: int = 0,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> List[CapaAction]:
+        """Fetch all CAPA actions across all investigations, sorted newest first."""
+        from sqlalchemy.orm import joinedload
+        from sqlalchemy import or_
+
+        stmt = select(CapaAction).options(joinedload(CapaAction.investigation))
+
+        if status and status.strip() and status.upper() != "ALL":
+            stmt = stmt.where(CapaAction.action_status == status)
+
+        if search and search.strip():
+            term = f"%{search.strip()}%"
+            stmt = stmt.where(
+                or_(
+                    CapaAction.description.ilike(term),
+                    CapaAction.action_owner.ilike(term),
+                    CapaAction.effectiveness_verification.ilike(term),
+                )
+            )
+
+        stmt = stmt.order_by(CapaAction.created_at.desc()).offset(offset).limit(limit)
+        return list(db.scalars(stmt).unique().all())
+
     def update(self, db: Session, capa: CapaAction, update_data: dict) -> CapaAction:
         """Update fields on an existing CAPA action."""
         for field, value in update_data.items():

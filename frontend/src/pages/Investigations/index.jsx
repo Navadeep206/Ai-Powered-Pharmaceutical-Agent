@@ -37,21 +37,30 @@ export default function InvestigationsPage() {
   } = useSelector((state) => state.investigations);
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [severityFilter, setSeverityFilter] = useState('ALL');
   const [currentPage, setCurrentPage] = useState(1);
+
+  // Debounce search input to avoid redundant API queries and race conditions
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   const loadData = useCallback(() => {
     dispatch(
       fetchInvestigations({
         page: currentPage,
         limit: 15,
-        search: searchTerm,
+        search: debouncedSearch,
         status: statusFilter,
         severity: severityFilter,
       })
     );
-  }, [dispatch, currentPage, searchTerm, statusFilter, severityFilter]);
+  }, [dispatch, currentPage, debouncedSearch, statusFilter, severityFilter]);
 
   useEffect(() => {
     loadData();
@@ -62,6 +71,7 @@ export default function InvestigationsPage() {
 
   const resetFilters = () => {
     setSearchTerm('');
+    setDebouncedSearch('');
     setStatusFilter('ALL');
     setSeverityFilter('ALL');
     setCurrentPage(1);

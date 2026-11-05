@@ -26,6 +26,10 @@ export default function Sidebar() {
   const { appName, tagline, currentFacility, systemStatus, mobileNavOpen } = useSelector(
     (state) => state.app
   );
+  const { summary } = useSelector((state) => state.dashboard);
+
+  const activeCount = summary?.open_investigations;
+  const activeBadge = typeof activeCount === 'number' && activeCount > 0 ? `${activeCount} Active` : null;
 
   const navItems = [
     {
@@ -40,7 +44,7 @@ export default function Sidebar() {
       to: '/investigations',
       icon: Activity,
       end: true,
-      badge: '2 Active',
+      badge: activeBadge,
     },
     {
       name: 'New Investigation',

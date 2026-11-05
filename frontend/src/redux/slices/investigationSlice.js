@@ -282,6 +282,28 @@ export const createEvidenceRecord = createAsyncThunk(
   }
 );
 
+/**
+ * Update and persist evidence review status to PostgreSQL.
+ */
+export const updateEvidenceStatusAsync = createAsyncThunk(
+  'investigations/updateEvidenceStatusAsync',
+  async ({ investigationId, evidenceId, status, notes }, { rejectWithValue }) => {
+    try {
+      const reviewStatus = status === 'Verified by QA' ? 'Verified' : status || 'Pending Review';
+      const data = await evidenceService.updateEvidence(investigationId, evidenceId, {
+        review_status: reviewStatus,
+        notes: notes || null,
+      });
+      return normalizeEvidence(data);
+    } catch (err) {
+      return rejectWithValue({
+        message: err.message || 'Failed to update evidence status in database.',
+        statusCode: err.statusCode || null,
+      });
+    }
+  }
+);
+
 export const fetchInvestigationCAPA = createAsyncThunk(
   'investigations/fetchCAPA',
   async (id, { rejectWithValue }) => {
@@ -875,6 +897,24 @@ export const investigationSlice = createSlice({
           state.currentInvestigation.evidence.unshift(action.payload);
         }
         state.evidence.unshift(action.payload);
+      })
+
+      // Evidence - Update Status
+      .addCase(updateEvidenceStatusAsync.fulfilled, (state, action) => {
+        if (state.currentInvestigation && Array.isArray(state.currentInvestigation.evidence)) {
+          const idx = state.currentInvestigation.evidence.findIndex(
+            (e) => e.id === action.payload.id || e.evidence_id === action.payload.evidence_id
+          );
+          if (idx !== -1) {
+            state.currentInvestigation.evidence[idx] = action.payload;
+          }
+        }
+        const stateIdx = state.evidence.findIndex(
+          (e) => e.id === action.payload.id || e.evidence_id === action.payload.evidence_id
+        );
+        if (stateIdx !== -1) {
+          state.evidence[stateIdx] = action.payload;
+        }
       })
 
       // CAPA - Fetch

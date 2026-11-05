@@ -10,6 +10,7 @@ import {
   saveInvestigationRCA,
   generateInvestigationRCA,
   createEvidenceRecord,
+  updateEvidenceStatusAsync,
   generateCAPAActions,
   createCAPAAction,
   reviewCAPAActions,
@@ -250,6 +251,23 @@ export default function InvestigationDetailPage() {
       dispatch(fetchDashboardActivities());
     } catch (err) {
       console.error('Failed to persist evidence record:', err);
+    }
+  };
+
+  const handleUpdateEvidenceStatus = async (evidenceId, status) => {
+    if (!id) return;
+    try {
+      await dispatch(
+        updateEvidenceStatusAsync({
+          investigationId: id,
+          evidenceId,
+          status,
+        })
+      ).unwrap();
+      dispatch(fetchDashboardSummary());
+      dispatch(fetchDashboardActivities());
+    } catch (err) {
+      console.error('Failed to persist updated evidence status:', err);
     }
   };
 
@@ -681,9 +699,7 @@ export default function InvestigationDetailPage() {
         <EvidenceList
           evidence={currentInvestigation.evidence || []}
           onAddEvidence={handleAddEvidence}
-          onUpdateEvidenceStatus={(evidenceId, status) =>
-            dispatch(updateEvidenceStatus({ id, evidenceId, status }))
-          }
+          onUpdateEvidenceStatus={handleUpdateEvidenceStatus}
         />
       )}
 

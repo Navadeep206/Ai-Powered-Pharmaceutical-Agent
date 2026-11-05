@@ -20,6 +20,7 @@ from app.schemas.evidence import (
     EvidenceResponse,
     EvidenceReviewStatusEnum,
     EvidenceTypeEnum,
+    EvidenceUpdate,
 )
 
 logger = get_logger("services.evidence")
@@ -162,6 +163,61 @@ class EvidenceService:
 
         items = evidence_repository.list_by_investigation(db, inv.id)
         return [self.to_evidence_response(inv.investigation_number, item) for item in items]
+
+    def update_evidence(
+        self,
+        db: Session,
+        investigation_id: str,
+        evidence_id: str,
+        payload: EvidenceUpdate,
+    ) -> EvidenceResponse:
+        """Update review status or notes on an existing evidence record in PostgreSQL."""
+        inv = investigation_repository.get_by_id(db, investigation_id)
+        if not inv:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Investigation '{investigation_id}' not found.",
+            )
+
+        evidence = evidence_repository.get_by_id(db, evidence_id)
+        if not evidence or evidence.investigation_id != inv.id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Evidence item '{evidence_id}' not found for investigation '{investigation_id}'.",
+            )
+
+        update_dict = {}
+        if payload.review_status is not None:
+            update_dict["review_status"] = payload.review_status
+        if payload.notes is not None:
+            update_dict["notes"] = payload.notes.strip() if payload.notes else None
+        if payload.description is not None:
+            desc = payload.description.strip()
+            if len(desc) < 5:
+                raise InvalidEvidenceDataError("Evidence description must be at least 5 characters.")
+            update_dict["description"] = desc
+
+        try:
+            updated = evidence_repository.update(db, evidence, update_dict)
+            activity_repository.create(
+                db,
+                {
+                    "investigation_id": inv.id,
+                    "activity_type": "EVIDENCE_STATUS_UPDATED",
+                    "description": f"Evidence {evidence.id} review status updated to '{evidence.review_status.value}'.",
+                    "actor_identifier": "System",
+                    "activity_metadata": {
+                        "evidence_id": str(evidence.id),
+                        "review_status": evidence.review_status.value,
+                    },
+                },
+            )
+            db.commit()
+            db.refresh(updated)
+            return self.to_evidence_response(inv.investigation_number, updated)
+        except Exception:
+            db.rollback()
+            raise
 
 
 # Singleton service instance

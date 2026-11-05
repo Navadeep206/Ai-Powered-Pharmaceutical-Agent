@@ -1,6 +1,6 @@
 """Schemas for document upload, extraction results, and incident intake."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Optional
 from pydantic import BaseModel, Field, model_validator
@@ -186,7 +186,7 @@ class NormalizedIncidentIntake(BaseModel):
         description="Preprocessing state: 'Ready for AI Analysis' or 'Preprocessing Completed (OCR Recommended)'",
     )
     processed_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(timezone.utc),
         description="Timestamp of preprocessing execution",
     )
     disclaimer: str = Field(

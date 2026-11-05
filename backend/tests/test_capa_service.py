@@ -72,12 +72,15 @@ def test_allowed_capa_status_transitions():
 
 
 def test_forbidden_capa_status_transitions():
-    """Verify skipping stages (e.g. Draft -> Completed) raises error."""
+    """Verify skipping stages (e.g. Draft -> Completed, Draft -> Closed) raises error."""
     with pytest.raises(InvalidCAPAStatusTransitionError):
         capa_service.validate_capa_status_transition(CAPAStatusEnum.DRAFT, CAPAStatusEnum.COMPLETED)
 
     with pytest.raises(InvalidCAPAStatusTransitionError):
-        capa_service.validate_capa_status_transition(CAPAStatusEnum.DRAFT, CAPAStatusEnum.APPROVED)
+        capa_service.validate_capa_status_transition(CAPAStatusEnum.DRAFT, CAPAStatusEnum.CLOSED)
+
+    with pytest.raises(InvalidCAPAStatusTransitionError):
+        capa_service.validate_capa_status_transition(CAPAStatusEnum.DRAFT, CAPAStatusEnum.IN_PROGRESS)
 
 
 def test_short_description_rejection():

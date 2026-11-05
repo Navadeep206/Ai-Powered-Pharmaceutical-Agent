@@ -4,7 +4,7 @@ from typing import List
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from app.database.session import get_db
-from app.schemas.evidence import EvidenceCreate, EvidenceResponse
+from app.schemas.evidence import EvidenceCreate, EvidenceResponse, EvidenceUpdate
 from app.services.evidence_service import evidence_service
 
 router = APIRouter(prefix="/investigations/{investigation_id}/evidence", tags=["Evidence"])
@@ -44,4 +44,25 @@ async def list_evidence(
     return evidence_service.list_evidence(
         db=db,
         investigation_id=investigation_id,
+    )
+
+
+@router.patch(
+    "/{evidence_id}",
+    response_model=EvidenceResponse,
+    summary="Update an evidence finding review status or notes",
+    description="Updates verification review status (Pending Review -> Verified / Rejected) and persists changes to PostgreSQL.",
+)
+async def update_evidence(
+    investigation_id: str,
+    evidence_id: str,
+    payload: EvidenceUpdate,
+    db: Session = Depends(get_db),
+):
+    """Updates evidence review status and records audit log in activity history."""
+    return evidence_service.update_evidence(
+        db=db,
+        investigation_id=investigation_id,
+        evidence_id=evidence_id,
+        payload=payload,
     )

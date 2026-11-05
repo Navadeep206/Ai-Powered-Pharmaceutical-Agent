@@ -28,6 +28,27 @@ class CauseVerificationStatusEnum(str, Enum):
     RULED_OUT = "Ruled Out"
 
 
+CAUSE_STATUS_ALIASES: Dict[str, CauseVerificationStatusEnum] = {
+    "ai suggestion": CauseVerificationStatusEnum.AI_SUGGESTION,
+    "ai_suggestion": CauseVerificationStatusEnum.AI_SUGGESTION,
+    "requires evidence": CauseVerificationStatusEnum.AI_SUGGESTION,
+    "requires_evidence": CauseVerificationStatusEnum.AI_SUGGESTION,
+    "evidence supported": CauseVerificationStatusEnum.EVIDENCE_SUPPORTED,
+    "evidence-supported": CauseVerificationStatusEnum.EVIDENCE_SUPPORTED,
+    "evidence_supported": CauseVerificationStatusEnum.EVIDENCE_SUPPORTED,
+    "pending review": CauseVerificationStatusEnum.HUMAN_REVIEWED,
+    "pending_review": CauseVerificationStatusEnum.HUMAN_REVIEWED,
+    "human reviewed": CauseVerificationStatusEnum.HUMAN_REVIEWED,
+    "human_reviewed": CauseVerificationStatusEnum.HUMAN_REVIEWED,
+    "confirmed root cause": CauseVerificationStatusEnum.CONFIRMED_ROOT_CAUSE,
+    "confirmed_root_cause": CauseVerificationStatusEnum.CONFIRMED_ROOT_CAUSE,
+    "confirmed by investigator": CauseVerificationStatusEnum.CONFIRMED_ROOT_CAUSE,
+    "confirmed_by_investigator": CauseVerificationStatusEnum.CONFIRMED_ROOT_CAUSE,
+    "ruled out": CauseVerificationStatusEnum.RULED_OUT,
+    "ruled_out": CauseVerificationStatusEnum.RULED_OUT,
+}
+
+
 class FiveWhysLevel(BaseModel):
     """Single step in a 5-Whys causal chain."""
 
@@ -76,6 +97,13 @@ class FiveWhysLevel(BaseModel):
                 data["evidence_references"] = data["supporting_evidence_references"]
             elif "evidence_references" in data and not data.get("supporting_evidence_references"):
                 data["supporting_evidence_references"] = data["evidence_references"]
+            # Reconcile status aliases
+            status_val = data.get("status") or data.get("review_status")
+            if isinstance(status_val, str):
+                normalized = CAUSE_STATUS_ALIASES.get(status_val.strip().lower())
+                if normalized:
+                    data["status"] = normalized
+                    data["review_status"] = normalized
         return data
 
     @property
@@ -143,6 +171,13 @@ class FishboneCause(BaseModel):
                 data["evidence_references"] = data["supporting_evidence_references"]
             elif "evidence_references" in data and not data.get("supporting_evidence_references"):
                 data["supporting_evidence_references"] = data["evidence_references"]
+            # Reconcile status aliases
+            status_val = data.get("status") or data.get("review_status")
+            if isinstance(status_val, str):
+                normalized = CAUSE_STATUS_ALIASES.get(status_val.strip().lower())
+                if normalized:
+                    data["status"] = normalized
+                    data["review_status"] = normalized
         return data
 
     @property

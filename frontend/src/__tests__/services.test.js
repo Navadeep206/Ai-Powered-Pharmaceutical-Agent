@@ -231,6 +231,28 @@ describe('API Service Modules Contract Verification', () => {
       expect(res.evidence_id).toBe('E-99');
     });
 
+    it('calls PATCH /investigations/:id/evidence/:evidence_id to update evidence status', async () => {
+      const payload = { review_status: 'Verified', notes: 'QA confirmed trace' };
+      const spy = vi.spyOn(api, 'patch').mockResolvedValueOnce({
+        data: { evidence_id: 'E-99', ...payload },
+      });
+
+      const res = await evidenceService.updateEvidence('INV-123', 'E-99', payload);
+      expect(spy).toHaveBeenCalledWith('/investigations/INV-123/evidence/E-99', payload);
+      expect(res.review_status).toBe('Verified');
+    });
+
+    it('calls GET /capa to list all CAPA actions across portfolio', async () => {
+      const spy = vi.spyOn(api, 'get').mockResolvedValueOnce({
+        data: [{ action_id: 'C-ALL-1', description: 'Enterprise CAPA action' }],
+      });
+
+      const res = await capaService.listAllCAPA({ status: 'In Progress' });
+      expect(spy).toHaveBeenCalledWith('/capa', { params: { status: 'In Progress' } });
+      expect(res).toHaveLength(1);
+      expect(res[0].action_id).toBe('C-ALL-1');
+    });
+
     it('calls GET /investigations/:id/capa', async () => {
       const spy = vi.spyOn(api, 'get').mockResolvedValueOnce({
         data: [{ action_id: 'C-1' }],

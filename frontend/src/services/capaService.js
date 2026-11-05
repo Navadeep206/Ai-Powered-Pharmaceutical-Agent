@@ -2,6 +2,14 @@ import api from './api';
 
 export const capaService = {
   /**
+   * Retrieve all CAPA actions across all investigations.
+   */
+  async listAllCAPA(params = {}) {
+    const response = await api.get('/capa', { params });
+    return response.data;
+  },
+
+  /**
    * Retrieve all corrective and preventive actions for an investigation.
    */
   async listCAPA(investigationId) {

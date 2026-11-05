@@ -18,6 +18,18 @@ export const evidenceService = {
     const response = await api.post(`/investigations/${encodeURIComponent(investigationId)}/evidence`, payload);
     return response.data;
   },
+
+  /**
+   * Update evidence review status or notes in PostgreSQL.
+   */
+  async updateEvidence(investigationId, evidenceId, payload) {
+    if (!investigationId || !evidenceId) throw new Error('Investigation ID and Evidence ID are required');
+    const response = await api.patch(
+      `/investigations/${encodeURIComponent(investigationId)}/evidence/${encodeURIComponent(evidenceId)}`,
+      payload
+    );
+    return response.data;
+  },
 };
 
 export default evidenceService;

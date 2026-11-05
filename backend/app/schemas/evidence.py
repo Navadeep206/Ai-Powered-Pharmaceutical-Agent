@@ -50,6 +50,24 @@ class EvidenceCreate(BaseModel):
     )
 
 
+class EvidenceUpdate(BaseModel):
+    """Payload to update an existing evidence item."""
+
+    review_status: Optional[EvidenceReviewStatusEnum] = Field(
+        default=None,
+        description="Updated review status: Pending Review, Verified, or Rejected",
+    )
+    notes: Optional[str] = Field(
+        default=None,
+        description="Updated investigator notes or evaluation context",
+    )
+    description: Optional[str] = Field(
+        default=None,
+        min_length=5,
+        description="Updated description of the evidence observation",
+    )
+
+
 class EvidenceResponse(BaseModel):
     """Structured response representing an evidence item."""
 

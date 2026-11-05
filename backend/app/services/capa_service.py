@@ -37,6 +37,9 @@ logger = get_logger("services.capa")
 # Permitted CAPA lifecycle transitions
 ALLOWED_CAPA_TRANSITIONS: Set[Tuple[CAPAStatusEnum, CAPAStatusEnum]] = {
     (CAPAStatusEnum.DRAFT, CAPAStatusEnum.PROPOSED),
+    (CAPAStatusEnum.DRAFT, CAPAStatusEnum.PENDING_REVIEW),
+    (CAPAStatusEnum.DRAFT, CAPAStatusEnum.APPROVED),
+    (CAPAStatusEnum.DRAFT, CAPAStatusEnum.REJECTED),
     (CAPAStatusEnum.PROPOSED, CAPAStatusEnum.PENDING_REVIEW),
     (CAPAStatusEnum.PROPOSED, CAPAStatusEnum.APPROVED),
     (CAPAStatusEnum.PROPOSED, CAPAStatusEnum.REJECTED),
@@ -242,6 +245,32 @@ class CAPAService:
 
         items = capa_repository.list_by_investigation(db, inv.id)
         return [self.to_capa_response(inv.investigation_number, item) for item in items]
+
+    def list_all_capa(
+        self,
+        db: Session,
+        limit: int = 50,
+        offset: int = 0,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> List[CAPAResponse]:
+        """Fetch all CAPA actions across all investigations from PostgreSQL."""
+        actions = capa_repository.list_all(
+            db=db,
+            limit=limit,
+            offset=offset,
+            status=status,
+            search=search,
+        )
+        responses: List[CAPAResponse] = []
+        for action in actions:
+            inv_number = (
+                action.investigation.investigation_number
+                if action.investigation
+                else str(action.investigation_id)
+            )
+            responses.append(self.to_capa_response(inv_number, action))
+        return responses
 
     def update_capa_status(
         self,
