@@ -7,6 +7,10 @@ import capaService from '../../services/capaService';
 import {
   normalizeInvestigation,
   normalizeExtractionResponse,
+  normalizeEvidence,
+  normalizeCAPA,
+  normalizeFiveWhys,
+  normalizeFishbone,
 } from '../../utils/normalizers';
 
 export const fetchInvestigations = createAsyncThunk(
@@ -156,15 +160,122 @@ export const fetchInvestigationRCA = createAsyncThunk(
   }
 );
 
+/**
+ * Persist 5-Whys and Ishikawa Fishbone findings into PostgreSQL.
+ */
+export const saveInvestigationRCA = createAsyncThunk(
+  'investigations/saveRCA',
+  async ({ investigationId, fiveWhys, fishboneCauses, summary }, { rejectWithValue }) => {
+    try {
+      const payload = {
+        five_whys: (fiveWhys || []).map((w, idx) => ({
+          level: w.level || idx + 1,
+          question: w.question || `Why level ${w.level || idx + 1}`,
+          answer: w.answer || '',
+          evidence_references: Array.isArray(w.evidence)
+            ? w.evidence
+            : typeof w.evidence === 'string' && w.evidence.trim()
+            ? [w.evidence.trim()]
+            : [],
+          is_root_cause: Boolean(w.is_root_cause),
+          status: w.status || 'Requires Evidence',
+        })),
+        fishbone_causes: Object.entries(fishboneCauses || {}).flatMap(([cat, list]) =>
+          (list || []).map((c, idx) => ({
+            cause_id: c.id || `CAUSE-${cat.slice(0, 3).toUpperCase()}-${idx + 1}`,
+            category: cat,
+            cause_description: c.cause || c.cause_description || '',
+            evidence_references: Array.isArray(c.evidence)
+              ? c.evidence
+              : typeof c.evidence === 'string' && c.evidence.trim()
+              ? [c.evidence.trim()]
+              : [],
+            status: c.status || 'Requires Evidence',
+            contributing_factors: [],
+          }))
+        ),
+        investigator_notes: summary || null,
+      };
+
+      const data = await rcaService.saveRCA(investigationId, payload);
+      return data;
+    } catch (err) {
+      return rejectWithValue({
+        message: err.message || 'Failed to persist RCA findings in PostgreSQL.',
+        statusCode: err.statusCode || null,
+      });
+    }
+  }
+);
+
+/**
+ * Trigger real LangGraph AI reasoning workflow for 5-Whys, 6M Fishbone, and Root Cause Candidates.
+ */
+export const generateInvestigationRCA = createAsyncThunk(
+  'investigations/generateRCA',
+  async ({ investigationId, problemStatement, incidentContext, facts }, { rejectWithValue }) => {
+    try {
+      const payload = {
+        problem_statement: problemStatement || undefined,
+        incident_context: incidentContext || {},
+        investigation_facts: facts || [],
+        persist: true,
+      };
+      const data = await rcaService.generateRCA(investigationId, payload);
+      return data;
+    } catch (err) {
+      return rejectWithValue({
+        message: err.message || 'AI RCA reasoning execution failed.',
+        statusCode: err.statusCode || null,
+      });
+    }
+  }
+);
+
 export const fetchInvestigationEvidence = createAsyncThunk(
   'investigations/fetchEvidence',
   async (id, { rejectWithValue }) => {
     try {
       const data = await evidenceService.listEvidence(id);
-      return data;
+      return (data || []).map(normalizeEvidence);
     } catch (err) {
       return rejectWithValue({
         message: err.message || 'Failed to retrieve evidence records.',
+        statusCode: err.statusCode || null,
+      });
+    }
+  }
+);
+
+/**
+ * Attach and persist a new evidence finding to PostgreSQL.
+ */
+export const createEvidenceRecord = createAsyncThunk(
+  'investigations/createEvidence',
+  async ({ investigationId, item }, { rejectWithValue }) => {
+    try {
+      let evidenceType = 'Supporting';
+      const cat = (item.category || '').toLowerCase();
+      if (cat.includes('contra')) evidenceType = 'Contradictory';
+      else if (cat.includes('miss')) evidenceType = 'Missing Evidence';
+      else if (cat.includes('question') || cat.includes('inquiry')) evidenceType = 'Investigator Question';
+
+      const payload = {
+        description: item.title
+          ? `${item.title}: ${item.notes || ''}`.trim()
+          : item.description || item.notes || 'Evidence item',
+        evidence_type: item.evidence_type || evidenceType,
+        source_reference: item.reference || item.source_reference || 'Physical / System Record',
+        review_status:
+          item.review_status || (item.status === 'Verified by QA' ? 'Verified' : 'Pending Review'),
+        notes: item.notes || null,
+      };
+
+      const data = await evidenceService.createEvidence(investigationId, payload);
+      return normalizeEvidence(data);
+    } catch (err) {
+      return rejectWithValue({
+        message: err.message || 'Failed to persist evidence record in PostgreSQL.',
         statusCode: err.statusCode || null,
       });
     }
@@ -176,10 +287,127 @@ export const fetchInvestigationCAPA = createAsyncThunk(
   async (id, { rejectWithValue }) => {
     try {
       const data = await capaService.listCAPA(id);
-      return data;
+      return (data || []).map(normalizeCAPA);
     } catch (err) {
       return rejectWithValue({
         message: err.message || 'Failed to retrieve CAPA records.',
+        statusCode: err.statusCode || null,
+      });
+    }
+  }
+);
+
+/**
+ * Execute LangGraph AI-assisted CAPA recommendations workflow.
+ */
+export const generateCAPAActions = createAsyncThunk(
+  'investigations/generateCAPA',
+  async ({ investigationId, problemStatement }, { rejectWithValue }) => {
+    try {
+      const data = await capaService.generateCAPA(investigationId, {
+        problem_statement: problemStatement || undefined,
+        persist: true,
+      });
+      return data;
+    } catch (err) {
+      return rejectWithValue({
+        message: err.message || 'AI CAPA recommendation generation failed.',
+        statusCode: err.statusCode || null,
+      });
+    }
+  }
+);
+
+/**
+ * Propose and persist a new CAPA remediation action to PostgreSQL.
+ */
+export const createCAPAAction = createAsyncThunk(
+  'investigations/createCAPA',
+  async ({ investigationId, actionData }, { rejectWithValue }) => {
+    try {
+      const payload = {
+        action_type: actionData.action_type || actionData.actionType || 'Corrective Action',
+        description: actionData.description || 'Remediation action specification',
+        action_owner: actionData.action_owner || actionData.actionOwner || 'QA Specialist',
+        target_date:
+          actionData.target_date ||
+          actionData.targetDate ||
+          new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+        effectiveness_verification_method:
+          actionData.effectiveness_verification_method ||
+          actionData.effectivenessVerification ||
+          'Verification protocol to be executed across subsequent commercial lots.',
+        status: actionData.status || 'Draft',
+        related_root_cause_reference: actionData.related_root_cause_reference || null,
+      };
+
+      const data = await capaService.createCAPA(investigationId, payload);
+      return normalizeCAPA(data);
+    } catch (err) {
+      return rejectWithValue({
+        message: err.message || 'Failed to record CAPA action in database.',
+        statusCode: err.statusCode || null,
+      });
+    }
+  }
+);
+
+/**
+ * Submit human QA review decisions (approval, rejection, owner/date edits) for CAPA actions.
+ */
+export const reviewCAPAActions = createAsyncThunk(
+  'investigations/reviewCAPA',
+  async ({ investigationId, decisions, generalComments }, { rejectWithValue }) => {
+    try {
+      const payload = {
+        decisions: decisions || [],
+        general_comments: generalComments || null,
+        reviewer_identifier: 'Quality Assurance Reviewer',
+      };
+      const data = await capaService.reviewCAPA(investigationId, payload);
+      return data;
+    } catch (err) {
+      return rejectWithValue({
+        message: err.message || 'Failed to apply CAPA review decisions.',
+        statusCode: err.statusCode || null,
+      });
+    }
+  }
+);
+
+/**
+ * Transition individual CAPA status adhering to GxP lifecycle gates.
+ */
+export const updateCAPAStatusAsync = createAsyncThunk(
+  'investigations/updateCAPAStatus',
+  async ({ investigationId, capaId, status, notes }, { rejectWithValue }) => {
+    try {
+      const data = await capaService.updateCAPAStatus(investigationId, capaId, {
+        status,
+        notes: notes || null,
+      });
+      return normalizeCAPA(data);
+    } catch (err) {
+      return rejectWithValue({
+        message: err.message || 'Failed to update CAPA status.',
+        statusCode: err.statusCode || null,
+      });
+    }
+  }
+);
+
+/**
+ * Retrieve document metadata associated with an investigation.
+ */
+export const fetchInvestigationDocuments = createAsyncThunk(
+  'investigations/fetchDocuments',
+  async (investigationId, { rejectWithValue }) => {
+    try {
+      const data = await investigationService.listDocuments(investigationId);
+      return data;
+    } catch (err) {
+      return rejectWithValue({
+        message: err.message || 'Failed to retrieve investigation documents.',
         statusCode: err.statusCode || null,
       });
     }
@@ -268,12 +496,10 @@ export const investigationSlice = createSlice({
       const { section, field, value, canonicalKey } = action.payload;
       if (!state.draftIntake.extractedData) return;
 
-      // 1. Update form section value
       if (state.draftIntake.extractedData[section]) {
         state.draftIntake.extractedData[section][field] = value;
       }
 
-      // 2. Update fieldMeta if present
       const metaKey = canonicalKey || field;
       if (state.draftIntake.extractedData.fieldMeta) {
         let targetMeta = state.draftIntake.extractedData.fieldMeta[metaKey];
@@ -416,7 +642,7 @@ export const investigationSlice = createSlice({
           id: `cause-${Date.now()}`,
           cause,
           category,
-          status: status || 'Pending Human Review',
+          status: status || 'Requires Evidence',
         });
       }
     },
@@ -440,18 +666,18 @@ export const investigationSlice = createSlice({
       const target = state.currentInvestigation?.id === id ? state.currentInvestigation : state.investigations.find((i) => i.id === id);
       if (target) {
         if (!target.evidence) target.evidence = [];
-        target.evidence.push({
-          id: `EVD-${Date.now()}`,
-          ...item,
-        });
+        target.evidence.push(normalizeEvidence(item));
       }
     },
     updateEvidenceStatus: (state, action) => {
       const { id, evidenceId, status } = action.payload;
       const target = state.currentInvestigation?.id === id ? state.currentInvestigation : state.investigations.find((i) => i.id === id);
       if (target && target.evidence) {
-        const item = target.evidence.find((e) => e.id === evidenceId);
-        if (item) item.status = status;
+        const item = target.evidence.find((e) => e.id === evidenceId || e.evidence_id === evidenceId);
+        if (item) {
+          item.status = status;
+          item.review_status = status;
+        }
       }
     },
     updateCAPA: (state, action) => {
@@ -552,7 +778,7 @@ export const investigationSlice = createSlice({
         state.draftIntake.extractionError = action.payload?.message || 'AI extraction failed.';
       })
 
-      // RCA
+      // RCA - Fetch
       .addCase(fetchInvestigationRCA.pending, (state) => {
         state.rcaLoading = true;
         state.rcaError = null;
@@ -562,22 +788,10 @@ export const investigationSlice = createSlice({
         state.rca = action.payload;
         if (state.currentInvestigation) {
           if (action.payload.five_whys?.length > 0) {
-            state.currentInvestigation.fiveWhys = action.payload.five_whys;
+            state.currentInvestigation.fiveWhys = normalizeFiveWhys(action.payload.five_whys);
           }
           if (action.payload.fishbone_causes?.length > 0) {
-            const grouped = {
-              Manpower: [],
-              Machine: [],
-              Method: [],
-              Material: [],
-              Measurement: [],
-              Environment: [],
-            };
-            action.payload.fishbone_causes.forEach((c) => {
-              const cat = c.category;
-              if (grouped[cat]) grouped[cat].push(c);
-            });
-            state.currentInvestigation.fishbone = grouped;
+            state.currentInvestigation.fishbone = normalizeFishbone(action.payload.fishbone_causes);
           }
         }
       })
@@ -586,7 +800,58 @@ export const investigationSlice = createSlice({
         state.rcaError = action.payload?.message || 'Failed to retrieve RCA analysis.';
       })
 
-      // Evidence
+      // RCA - Save
+      .addCase(saveInvestigationRCA.pending, (state) => {
+        state.rcaLoading = true;
+        state.rcaError = null;
+      })
+      .addCase(saveInvestigationRCA.fulfilled, (state, action) => {
+        state.rcaLoading = false;
+        state.rca = action.payload;
+        if (state.currentInvestigation) {
+          if (action.payload.five_whys?.length > 0) {
+            state.currentInvestigation.fiveWhys = normalizeFiveWhys(action.payload.five_whys);
+          }
+          if (action.payload.fishbone_causes?.length > 0) {
+            state.currentInvestigation.fishbone = normalizeFishbone(action.payload.fishbone_causes);
+          }
+        }
+      })
+      .addCase(saveInvestigationRCA.rejected, (state, action) => {
+        state.rcaLoading = false;
+        state.rcaError = action.payload?.message || 'Failed to save RCA findings in database.';
+      })
+
+      // RCA - Generate
+      .addCase(generateInvestigationRCA.pending, (state) => {
+        state.rcaLoading = true;
+        state.rcaError = null;
+      })
+      .addCase(generateInvestigationRCA.fulfilled, (state, action) => {
+        state.rcaLoading = false;
+        state.rca = action.payload;
+        if (state.currentInvestigation) {
+          if (action.payload.five_whys_analysis?.length > 0) {
+            state.currentInvestigation.fiveWhys = normalizeFiveWhys(action.payload.five_whys_analysis);
+          }
+          if (action.payload.fishbone_analysis?.length > 0) {
+            state.currentInvestigation.fishbone = normalizeFishbone(action.payload.fishbone_analysis);
+          }
+          if (action.payload.evidence_assessment?.length > 0) {
+            const newEvidences = action.payload.evidence_assessment.map(normalizeEvidence);
+            state.currentInvestigation.evidence = [
+              ...newEvidences,
+              ...(state.currentInvestigation.evidence || []),
+            ];
+          }
+        }
+      })
+      .addCase(generateInvestigationRCA.rejected, (state, action) => {
+        state.rcaLoading = false;
+        state.rcaError = action.payload?.message || 'Failed to generate AI RCA findings.';
+      })
+
+      // Evidence - Fetch
       .addCase(fetchInvestigationEvidence.pending, (state) => {
         state.evidenceLoading = true;
         state.evidenceError = null;
@@ -594,7 +859,7 @@ export const investigationSlice = createSlice({
       .addCase(fetchInvestigationEvidence.fulfilled, (state, action) => {
         state.evidenceLoading = false;
         state.evidence = action.payload;
-        if (state.currentInvestigation && Array.isArray(action.payload)) {
+        if (state.currentInvestigation) {
           state.currentInvestigation.evidence = action.payload;
         }
       })
@@ -603,7 +868,16 @@ export const investigationSlice = createSlice({
         state.evidenceError = action.payload?.message || 'Failed to retrieve evidence.';
       })
 
-      // CAPA
+      // Evidence - Create
+      .addCase(createEvidenceRecord.fulfilled, (state, action) => {
+        if (state.currentInvestigation) {
+          if (!state.currentInvestigation.evidence) state.currentInvestigation.evidence = [];
+          state.currentInvestigation.evidence.unshift(action.payload);
+        }
+        state.evidence.unshift(action.payload);
+      })
+
+      // CAPA - Fetch
       .addCase(fetchInvestigationCAPA.pending, (state) => {
         state.capaLoading = true;
         state.capaError = null;
@@ -611,13 +885,85 @@ export const investigationSlice = createSlice({
       .addCase(fetchInvestigationCAPA.fulfilled, (state, action) => {
         state.capaLoading = false;
         state.capa = action.payload;
-        if (state.currentInvestigation && Array.isArray(action.payload)) {
+        if (state.currentInvestigation) {
           state.currentInvestigation.capa = action.payload;
         }
       })
       .addCase(fetchInvestigationCAPA.rejected, (state, action) => {
         state.capaLoading = false;
         state.capaError = action.payload?.message || 'Failed to retrieve CAPA records.';
+      })
+
+      // CAPA - Generate
+      .addCase(generateCAPAActions.pending, (state) => {
+        state.capaLoading = true;
+        state.capaError = null;
+      })
+      .addCase(generateCAPAActions.fulfilled, (state, action) => {
+        state.capaLoading = false;
+        const normalizedList = (action.payload.capa_recommendations || []).map(normalizeCAPA);
+        if (state.currentInvestigation) {
+          state.currentInvestigation.capa = normalizedList;
+        }
+        state.capa = normalizedList;
+      })
+      .addCase(generateCAPAActions.rejected, (state, action) => {
+        state.capaLoading = false;
+        state.capaError = action.payload?.message || 'Failed to generate AI CAPA actions.';
+      })
+
+      // CAPA - Create
+      .addCase(createCAPAAction.fulfilled, (state, action) => {
+        if (state.currentInvestigation) {
+          if (!state.currentInvestigation.capa) state.currentInvestigation.capa = [];
+          state.currentInvestigation.capa.unshift(action.payload);
+        }
+        state.capa.unshift(action.payload);
+      })
+
+      // CAPA - Review
+      .addCase(reviewCAPAActions.pending, (state) => {
+        state.capaLoading = true;
+        state.capaError = null;
+      })
+      .addCase(reviewCAPAActions.fulfilled, (state, action) => {
+        state.capaLoading = false;
+        if (action.payload?.capa_recommendations?.length > 0) {
+          const normalizedList = action.payload.capa_recommendations.map(normalizeCAPA);
+          if (state.currentInvestigation) {
+            state.currentInvestigation.capa = normalizedList;
+          }
+          state.capa = normalizedList;
+        }
+      })
+      .addCase(reviewCAPAActions.rejected, (state, action) => {
+        state.capaLoading = false;
+        state.capaError = action.payload?.message || 'Failed to apply CAPA review decisions.';
+      })
+
+      // CAPA - Update Status
+      .addCase(updateCAPAStatusAsync.fulfilled, (state, action) => {
+        if (state.currentInvestigation && Array.isArray(state.currentInvestigation.capa)) {
+          const idx = state.currentInvestigation.capa.findIndex(
+            (c) => c.id === action.payload.id || c.action_id === action.payload.action_id
+          );
+          if (idx !== -1) {
+            state.currentInvestigation.capa[idx] = action.payload;
+          }
+        }
+        const stateIdx = state.capa.findIndex(
+          (c) => c.id === action.payload.id || c.action_id === action.payload.action_id
+        );
+        if (stateIdx !== -1) {
+          state.capa[stateIdx] = action.payload;
+        }
+      })
+
+      // Documents - Fetch
+      .addCase(fetchInvestigationDocuments.fulfilled, (state, action) => {
+        if (state.currentInvestigation) {
+          state.currentInvestigation.documents = action.payload;
+        }
       });
   },
 });

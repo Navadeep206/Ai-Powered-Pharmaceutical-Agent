@@ -183,6 +183,30 @@ describe('API Service Modules Contract Verification', () => {
       expect(spy).toHaveBeenCalledWith('/investigations/INV-123/rca');
     });
 
+    it('calls POST /investigations/:id/rca to persist findings', async () => {
+      const payload = { five_whys: [], fishbone_causes: [], investigator_notes: 'Notes' };
+      const spy = vi.spyOn(api, 'post').mockResolvedValueOnce({
+        data: { message: 'RCA findings recorded' },
+      });
+
+      const res = await rcaService.saveRCA('INV-123', payload);
+      expect(spy).toHaveBeenCalledWith('/investigations/INV-123/rca', payload);
+      expect(res.message).toBe('RCA findings recorded');
+    });
+
+    it('calls POST /investigations/:id/rca/generate for LangGraph AI reasoning', async () => {
+      const payload = { problem_statement: 'High moisture', incident_context: {} };
+      const spy = vi.spyOn(api, 'post').mockResolvedValueOnce({
+        data: { five_whys_analysis: [], fishbone_analysis: [] },
+      });
+
+      const res = await rcaService.generateRCA('INV-123', payload);
+      expect(spy).toHaveBeenCalledWith('/investigations/INV-123/rca/generate', payload, {
+        timeout: 90000,
+      });
+      expect(res.five_whys_analysis).toEqual([]);
+    });
+
     it('calls GET /investigations/:id/evidence', async () => {
       const spy = vi.spyOn(api, 'get').mockResolvedValueOnce({
         data: [{ evidence_id: 'E-1' }],
@@ -192,6 +216,21 @@ describe('API Service Modules Contract Verification', () => {
       expect(spy).toHaveBeenCalledWith('/investigations/INV-123/evidence');
     });
 
+    it('calls POST /investigations/:id/evidence to create evidence finding', async () => {
+      const payload = {
+        description: 'SCADA log reading',
+        evidence_type: 'Supporting',
+        source_reference: 'PLC-001',
+      };
+      const spy = vi.spyOn(api, 'post').mockResolvedValueOnce({
+        data: { evidence_id: 'E-99', ...payload },
+      });
+
+      const res = await evidenceService.createEvidence('INV-123', payload);
+      expect(spy).toHaveBeenCalledWith('/investigations/INV-123/evidence', payload);
+      expect(res.evidence_id).toBe('E-99');
+    });
+
     it('calls GET /investigations/:id/capa', async () => {
       const spy = vi.spyOn(api, 'get').mockResolvedValueOnce({
         data: [{ action_id: 'C-1' }],
@@ -199,6 +238,75 @@ describe('API Service Modules Contract Verification', () => {
 
       await capaService.listCAPA('INV-123');
       expect(spy).toHaveBeenCalledWith('/investigations/INV-123/capa');
+    });
+
+    it('calls POST /investigations/:id/capa to create a manual CAPA action', async () => {
+      const payload = {
+        action_type: 'Corrective Action',
+        description: 'Recalibrate RTD sensor',
+        action_owner: 'John Doe',
+        target_date: '2026-12-01',
+        effectiveness_verification_method: 'Test 3 lots',
+      };
+      const spy = vi.spyOn(api, 'post').mockResolvedValueOnce({
+        data: { action_id: 'C-99', ...payload },
+      });
+
+      const res = await capaService.createCAPA('INV-123', payload);
+      expect(spy).toHaveBeenCalledWith('/investigations/INV-123/capa', payload);
+      expect(res.action_id).toBe('C-99');
+    });
+
+    it('calls POST /investigations/:id/capa/generate for AI recommendations', async () => {
+      const payload = { problem_statement: 'High temperature excursion' };
+      const spy = vi.spyOn(api, 'post').mockResolvedValueOnce({
+        data: { capa_recommendations: [] },
+      });
+
+      const res = await capaService.generateCAPA('INV-123', payload);
+      expect(spy).toHaveBeenCalledWith('/investigations/INV-123/capa/generate', payload, {
+        timeout: 90000,
+      });
+      expect(res.capa_recommendations).toEqual([]);
+    });
+
+    it('calls POST /investigations/:id/capa/review with human review decisions', async () => {
+      const payload = {
+        decisions: [{ capa_id: 'C-1', decision: 'Approved' }],
+        general_comments: 'Verified by QA Lead',
+      };
+      const spy = vi.spyOn(api, 'post').mockResolvedValueOnce({
+        data: { capa_review_status: 'REVIEWED' },
+      });
+
+      const res = await capaService.reviewCAPA('INV-123', payload);
+      expect(spy).toHaveBeenCalledWith('/investigations/INV-123/capa/review', payload);
+      expect(res.capa_review_status).toBe('REVIEWED');
+    });
+
+    it('calls PATCH /investigations/:id/capa/:capa_id to transition status', async () => {
+      const payload = { status: 'In Progress', notes: 'Execution started' };
+      const spy = vi.spyOn(api, 'patch').mockResolvedValueOnce({
+        data: { action_id: 'C-1', status: 'In Progress' },
+      });
+
+      const res = await capaService.updateCAPAStatus('INV-123', 'C-1', payload);
+      expect(spy).toHaveBeenCalledWith('/investigations/INV-123/capa/C-1', payload);
+      expect(res.status).toBe('In Progress');
+    });
+
+    it('calls POST /investigations/:id/capa/resume to resume paused LangGraph thread', async () => {
+      const payload = {
+        thread_id: 'thread-xyz',
+        decisions: [{ capa_id: 'C-1', decision: 'Approved' }],
+      };
+      const spy = vi.spyOn(api, 'post').mockResolvedValueOnce({
+        data: { workflow_completion_status: 'COMPLETED' },
+      });
+
+      const res = await capaService.resumeCAPA('INV-123', payload);
+      expect(spy).toHaveBeenCalledWith('/investigations/INV-123/capa/resume', payload);
+      expect(res.workflow_completion_status).toBe('COMPLETED');
     });
   });
 });

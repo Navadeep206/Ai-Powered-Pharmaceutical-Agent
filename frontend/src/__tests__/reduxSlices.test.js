@@ -10,6 +10,13 @@ import investigationReducer, {
   updateExtractedField,
   revertExtractedField,
   resetDraftIntake,
+  saveInvestigationRCA,
+  generateInvestigationRCA,
+  createEvidenceRecord,
+  generateCAPAActions,
+  createCAPAAction,
+  reviewCAPAActions,
+  updateCAPAStatusAsync,
 } from '../redux/slices/investigationSlice';
 import {
   normalizeInvestigation,
@@ -403,6 +410,181 @@ describe('Redux Slices & Normalizers', () => {
       expect(rejectedState.currentInvestigation).toBeNull();
       expect(rejectedState.detailStatusCode).toBe(404);
       expect(rejectedState.detailError).toContain('not found');
+    });
+
+    it('handles saveInvestigationRCA and updates currentInvestigation RCA state', () => {
+      const initialState = {
+        currentInvestigation: {
+          id: 'INV-100',
+          fiveWhys: [],
+          fishbone: {},
+        },
+        rca: null,
+        rcaLoading: true,
+        rcaError: null,
+      };
+
+      const payload = {
+        five_whys: [
+          { level: 1, question: 'Why 1', answer: 'Answer 1', status: 'Evidence-Supported', is_root_cause: false },
+        ],
+        fishbone_causes: [
+          { cause_id: 'C-1', category: 'Machine', cause_description: 'Valve seal degraded', status: 'Evidence-Supported' },
+        ],
+      };
+
+      const state = investigationReducer(initialState, {
+        type: saveInvestigationRCA.fulfilled.type,
+        payload,
+      });
+
+      expect(state.rcaLoading).toBe(false);
+      expect(state.rca).toEqual(payload);
+      expect(state.currentInvestigation.fiveWhys).toHaveLength(1);
+      expect(state.currentInvestigation.fiveWhys[0].answer).toBe('Answer 1');
+      expect(state.currentInvestigation.fishbone.Machine).toHaveLength(1);
+      expect(state.currentInvestigation.fishbone.Machine[0].cause).toBe('Valve seal degraded');
+    });
+
+    it('handles generateInvestigationRCA storing AI findings and evidence assessment', () => {
+      const initialState = {
+        currentInvestigation: {
+          id: 'INV-100',
+          fiveWhys: [],
+          fishbone: {},
+          evidence: [],
+        },
+        rca: null,
+        rcaLoading: true,
+        rcaError: null,
+      };
+
+      const payload = {
+        five_whys_analysis: [
+          { level: 1, why_question: 'Why temp spike?', answer: 'Coolant stopped' },
+        ],
+        fishbone_analysis: [
+          { cause_id: 'C-M1', category: 'Machine', cause_description: 'Pump failure' },
+        ],
+        evidence_assessment: [
+          { evidence_type: 'Supporting', description: 'Thermal probe chart confirms 82C' },
+        ],
+      };
+
+      const state = investigationReducer(initialState, {
+        type: generateInvestigationRCA.fulfilled.type,
+        payload,
+      });
+
+      expect(state.rcaLoading).toBe(false);
+      expect(state.currentInvestigation.fiveWhys).toHaveLength(1);
+      expect(state.currentInvestigation.fishbone.Machine).toHaveLength(1);
+      expect(state.currentInvestigation.evidence).toHaveLength(1);
+      expect(state.currentInvestigation.evidence[0].title).toBe('Thermal probe chart confirms 82C');
+    });
+
+    it('handles createEvidenceRecord prepending new evidence record', () => {
+      const initialState = {
+        currentInvestigation: {
+          id: 'INV-100',
+          evidence: [{ id: 'E-OLD', title: 'Old evidence' }],
+        },
+        evidence: [{ id: 'E-OLD', title: 'Old evidence' }],
+      };
+
+      const newEvidence = {
+        id: 'E-NEW',
+        title: 'New SCADA trace',
+        category: 'Supporting Evidence',
+        status: 'Under Review',
+      };
+
+      const state = investigationReducer(initialState, {
+        type: createEvidenceRecord.fulfilled.type,
+        payload: newEvidence,
+      });
+
+      expect(state.currentInvestigation.evidence).toHaveLength(2);
+      expect(state.currentInvestigation.evidence[0].id).toBe('E-NEW');
+      expect(state.evidence[0].id).toBe('E-NEW');
+    });
+
+    it('handles generateCAPAActions and createCAPAAction', () => {
+      const initialState = {
+        currentInvestigation: {
+          id: 'INV-100',
+          capa: [],
+        },
+        capa: [],
+        capaLoading: true,
+        capaError: null,
+      };
+
+      // 1. generateCAPAActions
+      const generatedState = investigationReducer(initialState, {
+        type: generateCAPAActions.fulfilled.type,
+        payload: {
+          capa_recommendations: [
+            {
+              action_id: 'CAPA-REC-1',
+              action_type: 'Corrective Action',
+              description: 'Replace reactor seal',
+              assigned_owner: 'Maintenance Lead',
+              actual_target_date: '2026-12-01',
+              review_status: 'Proposed',
+            },
+          ],
+        },
+      });
+
+      expect(generatedState.capaLoading).toBe(false);
+      expect(generatedState.currentInvestigation.capa).toHaveLength(1);
+      expect(generatedState.currentInvestigation.capa[0].id).toBe('CAPA-REC-1');
+      expect(generatedState.currentInvestigation.capa[0].status).toBe('Proposed');
+
+      // 2. createCAPAAction
+      const newAction = {
+        id: 'CAPA-MAN-1',
+        action_type: 'Preventive Action',
+        description: 'Update reactor SOP',
+        status: 'Proposed',
+      };
+
+      const stateAfterCreate = investigationReducer(generatedState, {
+        type: createCAPAAction.fulfilled.type,
+        payload: newAction,
+      });
+
+      expect(stateAfterCreate.currentInvestigation.capa).toHaveLength(2);
+      expect(stateAfterCreate.currentInvestigation.capa[0].id).toBe('CAPA-MAN-1');
+    });
+
+    it('handles updateCAPAStatusAsync updating existing CAPA status', () => {
+      const initialState = {
+        currentInvestigation: {
+          id: 'INV-100',
+          capa: [
+            { id: 'CAPA-1', description: 'Action 1', status: 'Approved' },
+          ],
+        },
+        capa: [
+          { id: 'CAPA-1', description: 'Action 1', status: 'Approved' },
+        ],
+      };
+
+      const updatedAction = {
+        id: 'CAPA-1',
+        description: 'Action 1',
+        status: 'In Progress',
+      };
+
+      const state = investigationReducer(initialState, {
+        type: updateCAPAStatusAsync.fulfilled.type,
+        payload: updatedAction,
+      });
+
+      expect(state.currentInvestigation.capa[0].status).toBe('In Progress');
+      expect(state.capa[0].status).toBe('In Progress');
     });
   });
 });

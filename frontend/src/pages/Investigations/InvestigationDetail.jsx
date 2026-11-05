@@ -6,6 +6,14 @@ import {
   fetchInvestigationRCA,
   fetchInvestigationEvidence,
   fetchInvestigationCAPA,
+  fetchInvestigationDocuments,
+  saveInvestigationRCA,
+  generateInvestigationRCA,
+  createEvidenceRecord,
+  generateCAPAActions,
+  createCAPAAction,
+  reviewCAPAActions,
+  updateCAPAStatusAsync,
   updateInvestigationDetails,
   updateFiveWhysLevel,
   addFishboneCause,
@@ -15,6 +23,7 @@ import {
   updateEvidenceStatus,
   updateCAPA,
 } from '../../redux/slices/investigationSlice';
+import { fetchDashboardSummary, fetchDashboardActivities } from '../../redux/slices/dashboardSlice';
 import investigationService from '../../services/investigationService';
 import InvestigationHeader from '../../components/investigation/InvestigationHeader';
 import InvestigationTabs from '../../components/investigation/InvestigationTabs';
@@ -34,6 +43,8 @@ import {
   AlertCircle,
   RotateCcw,
   ArrowLeft,
+  FileText,
+  Paperclip,
 } from 'lucide-react';
 
 /**
@@ -49,6 +60,12 @@ export default function InvestigationDetailPage() {
     detailLoading,
     detailError,
     detailStatusCode,
+    rcaLoading,
+    rcaError,
+    evidenceLoading,
+    evidenceError,
+    capaLoading,
+    capaError,
   } = useSelector((state) => state.investigations);
 
   const [activeTab, setActiveTab] = useState('overview');
@@ -77,6 +94,7 @@ export default function InvestigationDetailPage() {
       dispatch(fetchInvestigationRCA(id));
       dispatch(fetchInvestigationEvidence(id));
       dispatch(fetchInvestigationCAPA(id));
+      dispatch(fetchInvestigationDocuments(id));
     }
   }, [id, dispatch]);
 
@@ -159,12 +177,156 @@ export default function InvestigationDetailPage() {
           },
         })
       );
+      dispatch(fetchDashboardSummary());
+      dispatch(fetchDashboardActivities());
       setOverviewSavedToast(true);
       setTimeout(() => setOverviewSavedToast(false), 3000);
     } catch (err) {
       setSaveError(err.message || 'Failed to save changes to the backend database.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // RCA handlers
+  const handleSaveRCA = async (customLevels) => {
+    if (!id) return;
+    try {
+      const fiveWhysToSave = customLevels || currentInvestigation?.fiveWhys || [];
+      const fishboneToSave = currentInvestigation?.fishbone || {};
+      const summaryToSave = overviewForm.title || currentInvestigation?.title;
+      await dispatch(
+        saveInvestigationRCA({
+          investigationId: id,
+          fiveWhys: fiveWhysToSave,
+          fishboneCauses: fishboneToSave,
+          summary: summaryToSave,
+        })
+      ).unwrap();
+      dispatch(fetchDashboardSummary());
+      dispatch(fetchDashboardActivities());
+    } catch (err) {
+      console.error('Failed to save RCA findings in database:', err);
+    }
+  };
+
+  const handleGenerateRCA = async () => {
+    if (!id) return;
+    try {
+      await dispatch(
+        generateInvestigationRCA({
+          investigationId: id,
+          problemStatement: overviewForm.title || currentInvestigation?.title,
+          incidentContext: {
+            batch: overviewForm.batch,
+            department: overviewForm.department,
+            equipment: overviewForm.equipment,
+            product: overviewForm.productName,
+            description: overviewForm.description,
+            expected: overviewForm.expectedCondition,
+            actual: overviewForm.actualCondition,
+            impact: overviewForm.observedImpact,
+          },
+        })
+      ).unwrap();
+      dispatch(fetchDashboardSummary());
+      dispatch(fetchDashboardActivities());
+    } catch (err) {
+      console.error('Failed to execute AI RCA reasoning:', err);
+    }
+  };
+
+  // Evidence handlers
+  const handleAddEvidence = async (item) => {
+    if (!id) return;
+    try {
+      await dispatch(
+        createEvidenceRecord({
+          investigationId: id,
+          item,
+        })
+      ).unwrap();
+      dispatch(fetchDashboardSummary());
+      dispatch(fetchDashboardActivities());
+    } catch (err) {
+      console.error('Failed to persist evidence record:', err);
+    }
+  };
+
+  // CAPA handlers
+  const handleGenerateCAPA = async () => {
+    if (!id) return;
+    try {
+      await dispatch(
+        generateCAPAActions({
+          investigationId: id,
+          problemStatement: overviewForm.title || currentInvestigation?.title,
+        })
+      ).unwrap();
+      dispatch(fetchDashboardSummary());
+      dispatch(fetchDashboardActivities());
+    } catch (err) {
+      console.error('Failed to generate AI CAPA actions:', err);
+    }
+  };
+
+  const handleCreateCAPA = async (actionData) => {
+    if (!id) return;
+    try {
+      await dispatch(
+        createCAPAAction({
+          investigationId: id,
+          actionData,
+        })
+      ).unwrap();
+      dispatch(fetchDashboardSummary());
+      dispatch(fetchDashboardActivities());
+    } catch (err) {
+      console.error('Failed to propose CAPA action:', err);
+    }
+  };
+
+  const handleUpdateCAPAStatus = async (capaId, newStatus, editData) => {
+    if (!id) return;
+    try {
+      if (editData) {
+        const decisions = [
+          {
+            capa_id: String(capaId),
+            decision: newStatus,
+            edited_description: editData.description || undefined,
+            edited_owner: editData.action_owner || undefined,
+            edited_target_date: editData.target_date || undefined,
+            reviewer_comments: editData.notes || undefined,
+          },
+        ];
+        await dispatch(
+          reviewCAPAActions({
+            investigationId: id,
+            decisions,
+            generalComments: editData.notes || 'Human QA review applied in workspace',
+          })
+        ).unwrap();
+        dispatch(fetchInvestigationCAPA(id));
+      } else {
+        await dispatch(
+          updateCAPAStatusAsync({
+            investigationId: id,
+            capaId,
+            status: newStatus,
+          })
+        ).unwrap();
+      }
+      dispatch(fetchDashboardSummary());
+      dispatch(fetchDashboardActivities());
+    } catch (err) {
+      console.error('Failed to update CAPA status:', err);
+    }
+  };
+
+  const handleSaveAllCAPA = () => {
+    if (id) {
+      dispatch(fetchInvestigationCAPA(id));
     }
   };
 
@@ -239,6 +401,26 @@ export default function InvestigationDetailPage() {
         activeTab={activeTab}
         onTabChange={setActiveTab}
       />
+
+      {/* Global Error Banners for Specific Tab Async Actions */}
+      {rcaError && activeTab === 'rca' && (
+        <div className="p-3.5 rounded-xl border border-[#FECACA] bg-[#FEF2F2] text-xs text-[#991B1B] flex items-center space-x-2">
+          <AlertCircle className="w-4 h-4 shrink-0 text-[#DC2626]" />
+          <span>RCA Error: {rcaError}</span>
+        </div>
+      )}
+      {capaError && activeTab === 'capa' && (
+        <div className="p-3.5 rounded-xl border border-[#FECACA] bg-[#FEF2F2] text-xs text-[#991B1B] flex items-center space-x-2">
+          <AlertCircle className="w-4 h-4 shrink-0 text-[#DC2626]" />
+          <span>CAPA Error: {capaError}</span>
+        </div>
+      )}
+      {evidenceError && activeTab === 'evidence' && (
+        <div className="p-3.5 rounded-xl border border-[#FECACA] bg-[#FEF2F2] text-xs text-[#991B1B] flex items-center space-x-2">
+          <AlertCircle className="w-4 h-4 shrink-0 text-[#DC2626]" />
+          <span>Evidence Error: {evidenceError}</span>
+        </div>
+      )}
 
       {/* TAB 1: INCIDENT OVERVIEW */}
       {activeTab === 'overview' && (
@@ -373,6 +555,54 @@ export default function InvestigationDetailPage() {
               </div>
             </CardFooter>
           </Card>
+
+          {/* Associated Intake Documents */}
+          <Card>
+            <CardHeader className="py-3 bg-[#F8FAFC]">
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center space-x-2">
+                  <Paperclip className="w-4 h-4 text-[#0F9D91]" />
+                  <CardTitle className="text-sm font-bold text-[#142B45]">
+                    Attached Intake Documents ({currentInvestigation.documents?.length || 0})
+                  </CardTitle>
+                </div>
+                <StatusBadge variant="teal" size="sm">
+                  PostgreSQL Persisted
+                </StatusBadge>
+              </div>
+            </CardHeader>
+            <CardContent className="p-4">
+              {currentInvestigation.documents && currentInvestigation.documents.length > 0 ? (
+                <div className="space-y-2">
+                  {currentInvestigation.documents.map((doc, idx) => (
+                    <div
+                      key={doc.document_id || idx}
+                      className="flex items-center justify-between p-3 rounded-lg border border-[#E2E8F0] bg-white hover:bg-[#F8FAFC] transition"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <FileText className="w-5 h-5 text-[#2563EB]" />
+                        <div>
+                          <p className="text-sm font-semibold text-[#142B45]">
+                            {doc.file_name}
+                          </p>
+                          <p className="text-xs text-[#64748B]">
+                            {doc.file_type || 'Document'} &bull; {((doc.file_size_bytes || 0) / 1024).toFixed(1)} KB &bull; Uploaded: {doc.created_at ? new Date(doc.created_at).toLocaleDateString() : 'N/A'}
+                          </p>
+                        </div>
+                      </div>
+                      {doc.ocr_applied && (
+                        <StatusBadge variant="info" size="sm">OCR Applied</StatusBadge>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-[#64748B] italic">
+                  No external physical document files attached. Intake record populated via direct narrative text.
+                </p>
+              )}
+            </CardContent>
+          </Card>
         </div>
       )}
 
@@ -420,7 +650,10 @@ export default function InvestigationDetailPage() {
               onSaveLevel={(idx, levelData) =>
                 dispatch(updateFiveWhysLevel({ id, levelIndex: idx, ...levelData }))
               }
-              onSaveAll={() => {}}
+              onSaveAll={(customLevels) => handleSaveRCA(customLevels)}
+              onGenerateAI={handleGenerateRCA}
+              isGenerating={rcaLoading}
+              isSaving={rcaLoading}
             />
           ) : (
             <FishboneAnalysis
@@ -434,6 +667,10 @@ export default function InvestigationDetailPage() {
               onRemoveCause={(category, causeId) =>
                 dispatch(removeFishboneCause({ id, category, causeId }))
               }
+              onSaveAll={() => handleSaveRCA()}
+              onGenerateAI={handleGenerateRCA}
+              isGenerating={rcaLoading}
+              isSaving={rcaLoading}
             />
           )}
         </div>
@@ -443,7 +680,7 @@ export default function InvestigationDetailPage() {
       {activeTab === 'evidence' && (
         <EvidenceList
           evidence={currentInvestigation.evidence || []}
-          onAddEvidence={(item) => dispatch(addEvidenceItem({ id, item }))}
+          onAddEvidence={handleAddEvidence}
           onUpdateEvidenceStatus={(evidenceId, status) =>
             dispatch(updateEvidenceStatus({ id, evidenceId, status }))
           }
@@ -453,8 +690,13 @@ export default function InvestigationDetailPage() {
       {/* TAB 4: CAPA PLAN */}
       {activeTab === 'capa' && (
         <CAPAForm
-          capa={currentInvestigation.capa || {}}
-          onSaveCAPA={(capaData) => dispatch(updateCAPA({ id, capa: capaData }))}
+          capa={currentInvestigation.capa || []}
+          onGenerateAI={handleGenerateCAPA}
+          onCreateCAPA={handleCreateCAPA}
+          onUpdateStatus={handleUpdateCAPAStatus}
+          onSaveCAPA={handleSaveAllCAPA}
+          isGenerating={capaLoading}
+          isSaving={capaLoading}
         />
       )}
     </div>

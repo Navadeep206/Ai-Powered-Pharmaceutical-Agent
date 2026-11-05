@@ -20,6 +20,10 @@ import InvestigationsPage from '../pages/Investigations/index';
 import InvestigationDetailPage from '../pages/Investigations/InvestigationDetail';
 import NewInvestigationPage from '../pages/Investigations/NewInvestigation';
 import ExtractionReviewForm from '../components/investigation/ExtractionReviewForm';
+import FiveWhysAnalysis from '../components/investigation/FiveWhysAnalysis';
+import FishboneAnalysis from '../components/investigation/FishboneAnalysis';
+import EvidenceList from '../components/investigation/EvidenceList';
+import CAPAForm from '../components/investigation/CAPAForm';
 import StatusDistribution from '../components/dashboard/StatusDistribution';
 import RecentInvestigations from '../components/dashboard/RecentInvestigations';
 import RecentActivity from '../components/dashboard/RecentActivity';
@@ -477,6 +481,206 @@ describe('Frontend Component Integration Tests', () => {
         expect(documentService.extractDocument).toHaveBeenCalledTimes(1);
         expect(screen.getByText('Verify Extracted Deviation Record')).toBeDefined();
       });
+    });
+  });
+
+  describe('FiveWhysAnalysis Component', () => {
+    it('renders 5-Whys levels and triggers AI generation and save', () => {
+      const mockFiveWhys = [
+        {
+          level: 1,
+          question: 'Why did reactor overheat?',
+          answer: 'Cooling jacket valve remained closed.',
+          evidence: 'SCADA Valve Log 04:12',
+          status: 'Evidence-Supported',
+          is_root_cause: false,
+        },
+        {
+          level: 2,
+          question: 'Why did the valve remain closed?',
+          answer: 'Air actuator solenoid failed.',
+          evidence: 'Maintenance report #892',
+          status: 'Evidence-Supported',
+          is_root_cause: true,
+        },
+      ];
+
+      const handleSaveLevel = vi.fn();
+      const handleSaveAll = vi.fn();
+      const handleGenerateAI = vi.fn();
+
+      render(
+        <FiveWhysAnalysis
+          fiveWhys={mockFiveWhys}
+          onSaveLevel={handleSaveLevel}
+          onSaveAll={handleSaveAll}
+          onGenerateAI={handleGenerateAI}
+        />
+      );
+
+      expect(screen.getByText('Why did reactor overheat?')).toBeDefined();
+      expect(screen.getByDisplayValue('Cooling jacket valve remained closed.')).toBeDefined();
+      expect(screen.getByText('Why did the valve remain closed?')).toBeDefined();
+
+      // Trigger AI reasoning
+      const aiBtn = screen.getByRole('button', { name: /generate ai 5-whys/i });
+      fireEvent.click(aiBtn);
+      expect(handleGenerateAI).toHaveBeenCalledTimes(1);
+
+      // Trigger Save
+      const saveBtns = screen.getAllByRole('button', { name: /save 5-whys/i });
+      fireEvent.click(saveBtns[0]);
+      expect(handleSaveAll).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('FishboneAnalysis Component', () => {
+    it('renders 6M Ishikawa categories and handles adding a cause', () => {
+      const mockFishbone = {
+        Machine: [
+          {
+            id: 'CAUSE-1',
+            cause: 'Solenoid coil burnout',
+            status: 'Evidence-Supported',
+            is_root_cause: true,
+          },
+        ],
+        Method: [],
+        Manpower: [],
+        Material: [],
+        Measurement: [],
+        Environment: [],
+      };
+
+      const handleAddCause = vi.fn();
+      const handleSaveAll = vi.fn();
+      const handleGenerateAI = vi.fn();
+
+      render(
+        <FishboneAnalysis
+          fishbone={mockFishbone}
+          onAddCause={handleAddCause}
+          onSaveAll={handleSaveAll}
+          onGenerateAI={handleGenerateAI}
+        />
+      );
+
+      expect(screen.getByText('Solenoid coil burnout')).toBeDefined();
+      expect(screen.getByText(/Machine \(Equipment\)/)).toBeDefined();
+
+      // Click Add Cause for Method
+      const addBtn = screen.getByRole('button', { name: /add method cause/i });
+      fireEvent.click(addBtn);
+
+      // Enter cause text
+      const input = screen.getByPlaceholderText(/potential failure mode/i);
+      fireEvent.change(input, { target: { value: 'Inadequate preventive maintenance schedule' } });
+
+      const confirmBtn = screen.getByRole('button', { name: /^add$/i });
+      fireEvent.click(confirmBtn);
+
+      expect(handleAddCause).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('EvidenceList Component', () => {
+    it('renders evidence categories and allows adding a new artifact', () => {
+      const mockEvidence = [
+        {
+          id: 'EVID-1',
+          title: 'Chromatogram Purity Peak',
+          category: 'Supporting Evidence',
+          type: 'HPLC Data',
+          reference: 'HPLC-2026-RUN-04',
+          status: 'Verified by QA',
+          notes: 'Exhibited 98.2% peak purity, confirming no chemical degradation.',
+        },
+      ];
+
+      const handleAddEvidence = vi.fn();
+      const handleUpdateStatus = vi.fn();
+
+      render(
+        <EvidenceList
+          evidence={mockEvidence}
+          onAddEvidence={handleAddEvidence}
+          onUpdateEvidenceStatus={handleUpdateStatus}
+        />
+      );
+
+      expect(screen.getByText('Chromatogram Purity Peak')).toBeDefined();
+      expect(screen.getByText(/HPLC-2026-RUN-04/)).toBeDefined();
+
+      // Open Add Evidence form
+      const addBtn = screen.getByRole('button', { name: /add evidence item/i });
+      fireEvent.click(addBtn);
+
+      expect(screen.getByText('Link New Evidence or Inquiry')).toBeDefined();
+      const titleInput = screen.getByPlaceholderText(/Chiller secondary flow transmitter/i);
+      fireEvent.change(titleInput, { target: { value: 'Calibration Certificate #2026-09' } });
+
+      const submitBtn = screen.getByRole('button', { name: /link evidence/i });
+      fireEvent.click(submitBtn);
+
+      expect(handleAddEvidence).toHaveBeenCalledTimes(1);
+      expect(handleAddEvidence).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Calibration Certificate #2026-09',
+        })
+      );
+    });
+  });
+
+  describe('CAPAForm Component', () => {
+    it('renders CAPA actions, supports AI recommendation, proposal, and QA approval/rejection', () => {
+      const mockCapa = [
+        {
+          id: 'CAPA-01',
+          action_id: 'CAPA-01',
+          action_type: 'Corrective Action',
+          description: 'Replace worn PTFE seal on reactor R-101 agitation shaft.',
+          action_owner: 'Maintenance Lead',
+          target_date: '2026-11-20',
+          effectiveness_verification_method: 'Pressure hold test across 3 commercial batches.',
+          status: 'Pending Review',
+        },
+      ];
+
+      const handleGenerateAI = vi.fn();
+      const handleCreateCAPA = vi.fn();
+      const handleUpdateStatus = vi.fn();
+
+      render(
+        <CAPAForm
+          capa={mockCapa}
+          onGenerateAI={handleGenerateAI}
+          onCreateCAPA={handleCreateCAPA}
+          onUpdateStatus={handleUpdateStatus}
+        />
+      );
+
+      expect(screen.getByText(/Replace worn PTFE seal on reactor R-101 agitation shaft/i)).toBeDefined();
+      expect(screen.getAllByText('Pending Review').length).toBeGreaterThan(0);
+
+      // Trigger AI generation
+      const aiBtn = screen.getByRole('button', { name: /generate ai capa/i });
+      fireEvent.click(aiBtn);
+      expect(handleGenerateAI).toHaveBeenCalledTimes(1);
+
+      // Approve action
+      const approveBtn = screen.getByRole('button', { name: /approve action/i });
+      fireEvent.click(approveBtn);
+      expect(handleUpdateStatus).toHaveBeenCalledWith('CAPA-01', 'Approved');
+
+      // Reject action
+      const rejectBtn = screen.getByRole('button', { name: /^reject$/i });
+      fireEvent.click(rejectBtn);
+      expect(handleUpdateStatus).toHaveBeenCalledWith('CAPA-01', 'Rejected');
+
+      // Propose manual CAPA
+      const proposeBtn = screen.getByRole('button', { name: /propose action/i });
+      fireEvent.click(proposeBtn);
+      expect(screen.getByText(/Propose New CAPA Remediation Action/i)).toBeDefined();
     });
   });
 });

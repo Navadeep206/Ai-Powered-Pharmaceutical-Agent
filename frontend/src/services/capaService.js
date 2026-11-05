@@ -30,7 +30,43 @@ export const capaService = {
     );
     return response.data;
   },
+
+  /**
+   * Generate AI-assisted CAPA recommendations using LangGraph workflow.
+   */
+  async generateCAPA(investigationId, payload = {}) {
+    if (!investigationId) throw new Error('Investigation ID is required');
+    const response = await api.post(
+      `/investigations/${encodeURIComponent(investigationId)}/capa/generate`,
+      payload,
+      { timeout: 90000 }
+    );
+    return response.data;
+  },
+
+  /**
+   * Submit human QA review decisions for CAPA recommendations (approve, reject, edit).
+   */
+  async reviewCAPA(investigationId, payload) {
+    if (!investigationId) throw new Error('Investigation ID is required');
+    const response = await api.post(
+      `/investigations/${encodeURIComponent(investigationId)}/capa/review`,
+      payload
+    );
+    return response.data;
+  },
+
+  /**
+   * Resume paused LangGraph thread waiting at human review gate.
+   */
+  async resumeCAPA(investigationId, payload) {
+    if (!investigationId) throw new Error('Investigation ID is required');
+    const response = await api.post(
+      `/investigations/${encodeURIComponent(investigationId)}/capa/resume`,
+      payload
+    );
+    return response.data;
+  },
 };
 
 export default capaService;
-

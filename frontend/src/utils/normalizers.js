@@ -18,6 +18,190 @@ export const STATUS_BADGE_MAP = {
 };
 
 /**
+ * Normalizes an individual evidence record from the backend into a robust structure.
+ */
+export function normalizeEvidence(e) {
+  if (!e) return null;
+  const id = e.evidence_id || e.id || `EVD-${Math.random().toString(36).substring(2, 9)}`;
+  const desc = e.description || e.title || '';
+  const rawType = e.evidence_type || e.category || 'Supporting';
+
+  // Map rawType to the 4 UI category buckets
+  let category = 'Supporting Evidence';
+  const lower = String(rawType).toLowerCase();
+  if (lower.includes('contra')) {
+    category = 'Contradictory Evidence';
+  } else if (lower.includes('miss')) {
+    category = 'Missing Evidence';
+  } else if (lower.includes('question') || lower.includes('inquiry')) {
+    category = 'Investigator Questions';
+  } else {
+    category = 'Supporting Evidence';
+  }
+
+  return {
+    ...e,
+    id,
+    evidence_id: id,
+    title: e.title || (desc.length > 55 ? `${desc.slice(0, 55)}...` : desc) || 'Evidence Record',
+    description: desc,
+    category,
+    evidence_type:
+      e.evidence_type ||
+      (category === 'Supporting Evidence'
+        ? 'Supporting'
+        : category === 'Contradictory Evidence'
+        ? 'Contradictory'
+        : category === 'Missing Evidence'
+        ? 'Missing Evidence'
+        : 'Investigator Question'),
+    type: e.type || e.evidence_format || 'Document Record',
+    reference: e.source_reference || e.reference || 'Investigation Record',
+    source_reference: e.source_reference || e.reference || 'Investigation Record',
+    status: e.review_status || e.status || 'Pending Review',
+    review_status: e.review_status || e.status || 'Pending Review',
+    notes: e.notes || '',
+    created_at: e.created_at || null,
+  };
+}
+
+/**
+ * Normalizes an individual CAPA action record from the backend into a robust structure.
+ */
+export function normalizeCAPA(c) {
+  if (!c) return null;
+  const id =
+    c.action_id ||
+    c.id ||
+    c.capa_id ||
+    `CAPA-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+
+  const rawType = c.action_type || c.actionType || '';
+  const actionType =
+    rawType.toLowerCase().includes('prev') ? 'Preventive Action' : 'Corrective Action';
+
+  const description = c.description || c.action_description || '';
+  const owner =
+    c.action_owner ||
+    c.actionOwner ||
+    c.assigned_owner ||
+    c.suggested_owner_role ||
+    'Unassigned';
+
+  const targetDateRaw =
+    c.target_date ||
+    c.targetDate ||
+    c.actual_target_date ||
+    c.suggested_target_date ||
+    '';
+  const targetDate = targetDateRaw ? String(targetDateRaw).split('T')[0] : '';
+
+  const verification =
+    c.effectiveness_verification_method ||
+    c.effectivenessVerification ||
+    (typeof c.effectiveness_verification === 'string'
+      ? c.effectiveness_verification
+      : c.effectiveness_verification?.verification_method) ||
+    'Effectiveness verification protocol to be confirmed by Quality Unit';
+
+  const status = c.status || c.action_status || c.review_status || 'Proposed';
+
+  return {
+    ...c,
+    id,
+    action_id: id,
+    capa_id: id,
+    action_type: actionType,
+    actionType,
+    description,
+    action_owner: owner,
+    actionOwner: owner,
+    target_date: targetDate,
+    targetDate,
+    effectiveness_verification_method: verification,
+    effectivenessVerification: verification,
+    status,
+    rationale: c.rationale || '',
+    related_root_cause_reference:
+      c.related_root_cause_reference || c.related_root_cause_id || null,
+    created_at: c.created_at || null,
+  };
+}
+
+/**
+ * Normalizes 5-Whys analysis list.
+ */
+export function normalizeFiveWhys(fiveWhys) {
+  if (!Array.isArray(fiveWhys)) return [];
+  return fiveWhys.map((w, idx) => ({
+    level: w.why_number || w.level || idx + 1,
+    question: w.question || `Why did level ${w.why_number || w.level || idx + 1} occur?`,
+    answer: w.answer || '',
+    evidence: Array.isArray(w.supporting_evidence_references)
+      ? w.supporting_evidence_references.join(', ')
+      : Array.isArray(w.evidence_references)
+      ? w.evidence_references.join(', ')
+      : w.evidence || '',
+    status:
+      w.review_status ||
+      w.status ||
+      (w.answer ? 'Evidence-Supported' : 'Requires Evidence'),
+    is_root_cause: Boolean(w.is_root_cause),
+  }));
+}
+
+/**
+ * Normalizes Fishbone causes into the 6 canonical Ishikawa categories.
+ */
+export function normalizeFishbone(fishbone) {
+  const initialGrouped = {
+    Manpower: [],
+    Machine: [],
+    Method: [],
+    Material: [],
+    Measurement: [],
+    Environment: [],
+  };
+
+  if (!fishbone) return initialGrouped;
+
+  // Case 1: Already an object grouped by category
+  if (typeof fishbone === 'object' && !Array.isArray(fishbone)) {
+    const res = { ...initialGrouped };
+    Object.keys(initialGrouped).forEach((cat) => {
+      if (Array.isArray(fishbone[cat])) {
+        res[cat] = fishbone[cat].map((item, idx) => ({
+          id: item.cause_id || item.id || `cause-${cat}-${idx}`,
+          cause: item.cause_description || item.cause || '',
+          category: cat,
+          status: item.review_status || item.status || 'Requires Evidence',
+          evidence: item.evidence_references || item.supporting_evidence_references || [],
+        }));
+      }
+    });
+    return res;
+  }
+
+  // Case 2: Flat Array of FishboneCause models from backend
+  if (Array.isArray(fishbone)) {
+    const res = { ...initialGrouped };
+    fishbone.forEach((item, idx) => {
+      const cat = item.category && res[item.category] ? item.category : 'Method';
+      res[cat].push({
+        id: item.cause_id || item.id || `cause-${cat}-${idx}`,
+        cause: item.cause_description || item.cause || '',
+        category: cat,
+        status: item.review_status || item.status || 'Requires Evidence',
+        evidence: item.evidence_references || item.supporting_evidence_references || [],
+      });
+    });
+    return res;
+  }
+
+  return initialGrouped;
+}
+
+/**
  * Normalizes an investigation record from the backend into a robust structure
  * usable by both flat-field views and nested-context tabs.
  */
@@ -34,14 +218,40 @@ export function normalizeInvestigation(raw) {
   const status = raw.investigation_status || raw.status || 'Open';
 
   const rawDate = raw.incident_date || raw.date;
-  const date = rawDate ? (typeof rawDate === 'string' ? rawDate.split('T')[0] : String(rawDate)) : (raw.created_at ? raw.created_at.split('T')[0] : '');
+  const date = rawDate
+    ? typeof rawDate === 'string'
+      ? rawDate.split('T')[0]
+      : String(rawDate)
+    : raw.created_at
+    ? raw.created_at.split('T')[0]
+    : '';
 
   const rawDetect = raw.detection_date || raw.detectionDate;
-  const detectionDate = rawDetect ? (typeof rawDetect === 'string' ? rawDetect.split('T')[0] : String(rawDetect)) : date;
+  const detectionDate = rawDetect
+    ? typeof rawDetect === 'string'
+      ? rawDetect.split('T')[0]
+      : String(rawDetect)
+    : date;
 
   const deviationId = raw.deviation_id || raw.deviationId || `DEV-${id}`;
   const description = raw.incident_description || raw.description || '';
   const immediateAction = raw.immediate_action_taken || raw.immediateAction || '';
+
+  const rawEvidence = raw.evidence || raw.evidence_records || [];
+  const normalizedEvidence = Array.isArray(rawEvidence)
+    ? rawEvidence.map(normalizeEvidence).filter(Boolean)
+    : [];
+
+  const rawCapa = raw.capa || raw.capa_actions || [];
+  const normalizedCapa = Array.isArray(rawCapa)
+    ? rawCapa.map(normalizeCAPA).filter(Boolean)
+    : [];
+
+  const rawFiveWhys = raw.fiveWhys || raw.five_whys || [];
+  const normalizedFiveWhys = normalizeFiveWhys(rawFiveWhys);
+
+  const rawFishbone = raw.fishbone || raw.fishbone_causes;
+  const normalizedFishbone = normalizeFishbone(rawFishbone);
 
   return {
     ...raw,
@@ -85,17 +295,11 @@ export function normalizeInvestigation(raw) {
       initialObservations: raw.initial_observations || raw.context?.initialObservations || '',
       ...(raw.context || {}),
     },
-    fiveWhys: raw.fiveWhys || raw.five_whys || [],
-    fishbone: raw.fishbone || raw.fishbone_causes || {
-      Manpower: [],
-      Machine: [],
-      Method: [],
-      Material: [],
-      Measurement: [],
-      Environment: [],
-    },
-    evidence: raw.evidence || raw.evidence_records || [],
-    capa: raw.capa || raw.capa_actions || [],
+    fiveWhys: normalizedFiveWhys,
+    fishbone: normalizedFishbone,
+    evidence: normalizedEvidence,
+    capa: normalizedCapa,
+    documents: raw.documents || [],
   };
 }
 
@@ -152,7 +356,9 @@ export function normalizeActivity(act) {
     id: act.activity_id || act.id || String(Math.random()),
     type: act.activity_type || 'ACTIVITY',
     description: act.description || 'System activity logged',
-    detail: `Logged by ${act.actor_identifier || 'System'} • Investigation ${act.investigation_id ? act.investigation_id.slice(0, 8) : 'General'}`,
+    detail: `Logged by ${act.actor_identifier || 'System'} • Investigation ${
+      act.investigation_id ? act.investigation_id.slice(0, 8) : 'General'
+    }`,
     time: timeStr,
     createdAt: act.created_at,
     iconName,
@@ -163,16 +369,17 @@ export function normalizeActivity(act) {
 
 /**
  * Normalizes an individual ExtractedField from the backend into a consistent structure.
- *
- * @param {Object|any} rawField - Backend ExtractedField or primitive value
- * @param {string} canonicalName - The canonical target field name
- * @returns {Object} Normalized ExtractedField with full metadata
  */
 export function normalizeExtractedField(rawField, canonicalName) {
-  if (rawField && typeof rawField === 'object' && ('value' in rawField || 'ai_extracted_value' in rawField)) {
-    const effectiveValue = rawField.value !== undefined && rawField.value !== null
-      ? rawField.value
-      : (rawField.ai_extracted_value ?? null);
+  if (
+    rawField &&
+    typeof rawField === 'object' &&
+    ('value' in rawField || 'ai_extracted_value' in rawField)
+  ) {
+    const effectiveValue =
+      rawField.value !== undefined && rawField.value !== null
+        ? rawField.value
+        : rawField.ai_extracted_value ?? null;
 
     return {
       fieldName: rawField.field_name || canonicalName,
@@ -181,7 +388,8 @@ export function normalizeExtractedField(rawField, canonicalName) {
       ai_extracted_value: rawField.ai_extracted_value ?? effectiveValue,
       human_edited_value: rawField.human_edited_value ?? null,
       is_human_modified: Boolean(rawField.is_human_modified),
-      confidence_score: typeof rawField.confidence_score === 'number' ? rawField.confidence_score : null,
+      confidence_score:
+        typeof rawField.confidence_score === 'number' ? rawField.confidence_score : null,
       source_reference: rawField.source_reference
         ? {
             source_type: rawField.source_reference.source_type || 'Unknown',
@@ -193,11 +401,14 @@ export function normalizeExtractedField(rawField, canonicalName) {
             is_traceable: rawField.source_reference.is_traceable ?? true,
           }
         : null,
-      extraction_status: rawField.extraction_status || (effectiveValue ? 'EXTRACTED' : 'MISSING'),
+      extraction_status:
+        rawField.extraction_status || (effectiveValue ? 'EXTRACTED' : 'MISSING'),
       review_status: rawField.review_status || 'AI_SUGGESTED',
       requires_human_review: rawField.requires_human_review ?? true,
       is_verified: Boolean(rawField.is_verified),
-      validation_warnings: Array.isArray(rawField.validation_warnings) ? rawField.validation_warnings : [],
+      validation_warnings: Array.isArray(rawField.validation_warnings)
+        ? rawField.validation_warnings
+        : [],
     };
   }
 
@@ -222,9 +433,6 @@ export function normalizeExtractedField(rawField, canonicalName) {
 
 /**
  * Normalizes backend ExtractionAnalysisResponse into a structured object for UI rendering.
- *
- * @param {Object} response - Backend ExtractionAnalysisResponse
- * @returns {Object} Standardized extraction review state
  */
 export function normalizeExtractionResponse(response) {
   if (!response) return null;
@@ -278,7 +486,7 @@ export function normalizeExtractionResponse(response) {
     equipment: fieldMeta.equipment_id?.value || '',
     incidentDate: fieldMeta.incident_date?.value || '',
     detectionDate: fieldMeta.detection_date?.value || '',
-    severity: 'Medium', // Default severity since extraction does not predict risk category
+    severity: 'Medium',
     immediateActionTaken: fieldMeta.immediate_action_taken?.value || '',
   };
 
@@ -303,9 +511,13 @@ export function normalizeExtractionResponse(response) {
     workflowStatus: response.workflow_status || null,
     intakeMethod: response.intake_method || 'Text',
     extractionStatus: response.extraction_status || 'NEEDS_REVIEW',
-    completenessScore: typeof response.completeness_score === 'number' ? response.completeness_score : 0,
-    overallConfidence: typeof response.overall_confidence === 'number' ? response.overall_confidence : 0,
-    disclaimer: response.disclaimer || 'AI-extracted fields require qualified human confirmation prior to RCA.',
+    completenessScore:
+      typeof response.completeness_score === 'number' ? response.completeness_score : 0,
+    overallConfidence:
+      typeof response.overall_confidence === 'number' ? response.overall_confidence : 0,
+    disclaimer:
+      response.disclaimer ||
+      'AI-extracted fields require qualified human confirmation prior to RCA.',
     extractionSummary: response.extraction_summary || null,
     missingFields: response.missing_fields || [],
     criticalGaps: response.critical_gaps || [],
@@ -326,26 +538,23 @@ export function normalizeExtractionResponse(response) {
 
 /**
  * Builds a compliant InvestigationCreate payload for POST /api/investigations.
- *
- * @param {Object} extractedData - The draftIntake.extractedData containing incidentInfo, context, etc.
- * @returns {Object} Validated InvestigationCreate payload
  */
 export function buildInvestigationPayloadFromReviewedData(extractedData) {
-  if (!extractedData) throw new Error('Cannot build investigation payload: extractedData is missing.');
+  if (!extractedData)
+    throw new Error('Cannot build investigation payload: extractedData is missing.');
 
   const info = extractedData.incidentInfo || {};
   const ctx = extractedData.context || {};
 
-  const cleanString = (val) => (val && typeof val === 'string' && val.trim() ? val.trim() : null);
+  const cleanString = (val) =>
+    val && typeof val === 'string' && val.trim() ? val.trim() : null;
 
   const cleanDate = (val) => {
     if (!val || typeof val !== 'string') return null;
     const trimmed = val.trim();
-    // Validate simple YYYY-MM-DD
     if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
       return trimmed;
     }
-    // Attempt parse
     try {
       const d = new Date(trimmed);
       if (!isNaN(d.getTime())) {

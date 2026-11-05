@@ -15,6 +15,10 @@ import {
   AlertCircle,
   HelpCircle,
   CheckCircle,
+  CheckCircle2,
+  Sparkles,
+  Save,
+  Loader2,
 } from 'lucide-react';
 
 const CATEGORY_META = {
@@ -65,22 +69,28 @@ const CATEGORY_META = {
 const STATUS_TAGS = {
   'AI Suggestion': { variant: 'teal', label: 'AI Suggestion' },
   'Requires Evidence': { variant: 'warning', label: 'Requires Evidence' },
-  'Pending Human Review': { variant: 'info', label: 'Pending Review' },
-  'Confirmed by Investigator': { variant: 'success', label: 'Confirmed by Investigator' },
+  'Pending Review': { variant: 'info', label: 'Pending Review' },
+  'Evidence-Supported': { variant: 'info', label: 'Evidence-Supported' },
+  'Confirmed by Investigator': { variant: 'success', label: 'Confirmed Cause' },
 };
 
 /**
- * 6M Ishikawa (Fishbone) Causal Analysis Interface.
+ * 6M Ishikawa (Fishbone) Causal Analysis Interface with AI generation and PostgreSQL persistence.
  */
 export default function FishboneAnalysis({
   fishbone = {},
   onAddCause,
   onUpdateCauseStatus,
   onRemoveCause,
+  onSaveAll,
+  onGenerateAI,
+  isGenerating = false,
+  isSaving = false,
 }) {
   const [activeAddCategory, setActiveAddCategory] = useState(null);
   const [newCauseText, setNewCauseText] = useState('');
   const [newCauseStatus, setNewCauseStatus] = useState('Requires Evidence');
+  const [savedNotification, setSavedNotification] = useState(false);
 
   const categories = Object.keys(CATEGORY_META);
 
@@ -93,6 +103,14 @@ export default function FishboneAnalysis({
 
     setNewCauseText('');
     setActiveAddCategory(null);
+  };
+
+  const handleSave = async () => {
+    if (onSaveAll) {
+      await onSaveAll();
+    }
+    setSavedNotification(true);
+    setTimeout(() => setSavedNotification(false), 3000);
   };
 
   return (
@@ -113,6 +131,44 @@ export default function FishboneAnalysis({
           <StatusBadge variant="warning" size="sm">Requires Evidence</StatusBadge>
           <StatusBadge variant="info" size="sm">Pending Review</StatusBadge>
           <StatusBadge variant="success" size="sm">Confirmed Cause</StatusBadge>
+        </div>
+      </div>
+
+      {/* Action Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-white rounded-xl border border-[#E2E8F0] shadow-2xs">
+        <div>
+          <h3 className="text-sm font-bold text-[#142B45]">
+            6M Multi-Factor Causal Analysis Matrix
+          </h3>
+          <p className="text-xs text-[#64748B]">
+            Evaluate root cause candidates across Manpower, Machine, Method, Material, Measurement, and Environment.
+          </p>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          {onGenerateAI && (
+            <Button
+              variant="accent"
+              size="sm"
+              leftIcon={isGenerating ? Loader2 : Sparkles}
+              onClick={onGenerateAI}
+              disabled={isGenerating}
+            >
+              {isGenerating ? 'Running AI 6M Reasoning...' : 'Generate AI Fishbone'}
+            </Button>
+          )}
+
+          {onSaveAll && (
+            <Button
+              variant="primary"
+              size="sm"
+              leftIcon={Save}
+              onClick={handleSave}
+              disabled={isSaving || isGenerating}
+            >
+              {isSaving ? 'Persisting to DB...' : 'Save Fishbone'}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -195,7 +251,8 @@ export default function FishboneAnalysis({
                             >
                               <option value="AI Suggestion">AI Suggestion</option>
                               <option value="Requires Evidence">Requires Evidence</option>
-                              <option value="Pending Human Review">Pending Review</option>
+                              <option value="Pending Review">Pending Review</option>
+                              <option value="Evidence-Supported">Evidence-Supported</option>
                               <option value="Confirmed by Investigator">Confirmed Cause</option>
                             </select>
                           </div>
@@ -228,7 +285,8 @@ export default function FishboneAnalysis({
                       >
                         <option value="Requires Evidence">Requires Evidence</option>
                         <option value="AI Suggestion">AI Suggestion</option>
-                        <option value="Pending Human Review">Pending Review</option>
+                        <option value="Pending Review">Pending Review</option>
+                        <option value="Evidence-Supported">Evidence-Supported</option>
                       </select>
 
                       <div className="flex items-center space-x-1.5">
@@ -260,7 +318,7 @@ export default function FishboneAnalysis({
                       setActiveAddCategory(catKey);
                       setNewCauseText('');
                     }}
-                    className="w-full py-2 border border-dashed border-[#CBD5E1] rounded-lg text-xs font-medium text-[#64748B] hover:text-[#0F9D91] hover:border-[#0F9D91] hover:bg-[#E6F7F5]/30 transition-all flex items-center justify-center space-x-1"
+                    className="w-full py-2 border border-dashed border-[#CBD5E1] rounded-lg text-xs font-medium text-[#64748B] hover:text-[#0F9D91] hover:border-[#0F9D91] hover:bg-[#E6F7F5]/30 transition-all flex items-center justify-center space-x-1 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span>Add {catKey} Cause</span>
@@ -271,7 +329,31 @@ export default function FishboneAnalysis({
           );
         })}
       </div>
+
+      {/* Save Action Footer */}
+      {onSaveAll && (
+        <div className="flex items-center justify-between p-4 bg-white rounded-xl border border-[#E2E8F0] shadow-2xs">
+          <div className="text-xs text-[#64748B]">
+            {savedNotification ? (
+              <span className="text-[#059669] font-semibold flex items-center">
+                <CheckCircle2 className="w-4 h-4 mr-1" /> Fishbone Causal Hypotheses Persisted in Database
+              </span>
+            ) : (
+              <span>Persisting records associates 6M hypotheses with investigation {fishbone ? 'study' : ''} in PostgreSQL.</span>
+            )}
+          </div>
+
+          <Button
+            variant="primary"
+            size="sm"
+            leftIcon={Save}
+            onClick={handleSave}
+            disabled={isSaving || isGenerating}
+          >
+            {isSaving ? 'Persisting to DB...' : 'Save Fishbone Matrix'}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
-
