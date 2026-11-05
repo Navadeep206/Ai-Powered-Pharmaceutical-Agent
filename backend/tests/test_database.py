@@ -113,3 +113,4 @@ def test_readiness_endpoint_503_when_database_unavailable():
         assert data["status"] == "unavailable"
         assert data["database"] == "disconnected"
         assert "password" not in str(data).lower()
+
