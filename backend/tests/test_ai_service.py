@@ -227,3 +227,4 @@ def test_core_health_endpoints_remain_independent_of_groq():
         assert ready_res.status_code == 200
         assert ready_res.json()["status"] == "ready"
         assert ready_res.json()["database"] == "connected"
+

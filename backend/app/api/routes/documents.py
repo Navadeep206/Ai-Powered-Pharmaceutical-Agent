@@ -1,6 +1,6 @@
 """Document upload and incident intake route definitions."""
 
-from typing import Optional
+from typing import Optional, Union
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 from app.core.exceptions import DocumentProcessingError, IncidentIntakeError
@@ -10,7 +10,9 @@ from app.schemas.document import (
     DocumentExtractionResult,
     NormalizedIncidentIntake,
 )
+from app.schemas.extraction import ExtractionAnalysisResponse
 from app.services.document_service import document_service
+from app.services.extraction_service import extraction_service
 from app.services.intake_service import intake_service
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
@@ -66,15 +68,49 @@ async def upload_document(
 
 @router.post(
     "/analyze",
-    response_model=NormalizedIncidentIntake,
+    response_model=Union[NormalizedIncidentIntake, ExtractionAnalysisResponse],
     status_code=status.HTTP_200_OK,
     summary="Preprocess incident intake content",
-    description="Validates and normalizes multi-modal incident inputs (PDF extraction, narrative text, or email). NOTE: AI entity extraction is pending future phases; returned content represents verified preprocessed source text.",
+    description="Validates and normalizes multi-modal incident inputs (PDF extraction, narrative text, or email). If extract=true, additionally runs AI structured extraction via Groq.",
 )
-async def analyze_document(payload: DocumentAnalysisRequest):
+async def analyze_document(
+    payload: DocumentAnalysisRequest,
+    extract: bool = Query(default=False, description="Whether to trigger AI structured extraction"),
+    raise_on_error: bool = Query(default=False, description="Whether to raise HTTP error on AI failure"),
+):
     """Executes normalization and preparation across document, narrative text, or email intake channels."""
     try:
         normalized_intake = intake_service.prepare_intake(payload)
+        if extract:
+            return extraction_service.extract_incident_information(
+                normalized_intake=normalized_intake,
+                raise_on_error=raise_on_error,
+            )
         return normalized_intake
+    except IncidentIntakeError as err:
+        raise err
+
+
+@router.post(
+    "/extract",
+    response_model=ExtractionAnalysisResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Extract structured incident information using Groq",
+    description="Executes normalization across document, narrative text, or email intake channels, then prompts Groq LLM to extract structured deviation attributes with provenance citations.",
+)
+async def extract_document_information(
+    payload: DocumentAnalysisRequest,
+    raise_on_error: bool = Query(
+        default=False,
+        description="Whether to raise HTTP error on upstream AI failure instead of returning FAILED status",
+    ),
+):
+    """Executes normalization and performs structured information extraction via Groq ChatGroq."""
+    try:
+        normalized_intake = intake_service.prepare_intake(payload)
+        return extraction_service.extract_incident_information(
+            normalized_intake=normalized_intake,
+            raise_on_error=raise_on_error,
+        )
     except IncidentIntakeError as err:
         raise err

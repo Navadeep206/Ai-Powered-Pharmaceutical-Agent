@@ -38,6 +38,9 @@ from app.schemas.document import (
     NormalizedIncidentIntake,
 )
 from app.schemas.extraction import (
+    FieldExtractionStatus,
+    OverallExtractionStatus,
+    SourceReference,
     ExtractedField,
     IncidentExtractedData,
     ExtractionAnalysisResponse,
@@ -94,6 +97,9 @@ __all__ = [
     "PageReference",
     "NormalizedIncidentIntake",
     # Extraction
+    "FieldExtractionStatus",
+    "OverallExtractionStatus",
+    "SourceReference",
     "ExtractedField",
     "IncidentExtractedData",
     "ExtractionAnalysisResponse",

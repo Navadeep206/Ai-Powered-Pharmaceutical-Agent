@@ -218,3 +218,4 @@ class AIService:
 
 # Singleton service instance
 ai_service = AIService()
+
