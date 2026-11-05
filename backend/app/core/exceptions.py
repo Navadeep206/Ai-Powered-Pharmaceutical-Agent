@@ -157,3 +157,4 @@ class InvalidCAPAStatusTransitionError(CAPAError):
     """Raised when illegal CAPA lifecycle state progression is attempted."""
 
     pass
+

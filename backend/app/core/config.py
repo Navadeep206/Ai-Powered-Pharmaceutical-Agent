@@ -6,6 +6,7 @@ or .env files with safe non-secret defaults.
 
 from pathlib import Path
 from typing import List
+from urllib.parse import urlparse
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Base directory for backend where .env is stored
@@ -43,6 +44,20 @@ class Settings(BaseSettings):
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ]
+
+    @property
+    def safe_database_url(self) -> str:
+        """Return masked database connection string without passwords for safe diagnostics."""
+        try:
+            parsed = urlparse(self.DATABASE_URL)
+            if parsed.password:
+                netloc = f"{parsed.username}:***@{parsed.hostname}"
+                if parsed.port:
+                    netloc += f":{parsed.port}"
+                return parsed._replace(netloc=netloc).geturl()
+            return self.DATABASE_URL
+        except Exception:
+            return "postgresql+psycopg://***"
 
 
 settings = Settings()

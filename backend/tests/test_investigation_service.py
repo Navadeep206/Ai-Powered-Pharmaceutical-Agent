@@ -89,3 +89,4 @@ def test_prepare_investigation_response():
     assert response.investigation_id.startswith("INV-2026-")
     assert response.incident_title == payload.incident_title
     assert response.created_at is not None
+

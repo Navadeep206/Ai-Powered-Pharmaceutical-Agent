@@ -131,3 +131,4 @@ def test_normalize_extracted_text():
     raw = "  Line 1   with   spaces  \r\n\r\n\r\nLine 2 after multi breaks \t\t with tabs  "
     normalized = document_service.normalize_extracted_text(raw)
     assert "Line 1 with spaces\n\nLine 2 after multi breaks with tabs" in normalized
+
