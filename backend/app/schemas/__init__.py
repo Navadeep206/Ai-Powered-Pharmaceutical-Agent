@@ -82,6 +82,7 @@ from app.schemas.capa import (
 )
 from app.schemas.dashboard import (
     DashboardSummaryResponse,
+    DashboardActivityResponse,
 )
 
 __all__ = [
@@ -151,4 +152,5 @@ __all__ = [
     "CAPAStatusUpdate",
     # Dashboard
     "DashboardSummaryResponse",
+    "DashboardActivityResponse",
 ]

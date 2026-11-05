@@ -397,3 +397,20 @@ def test_data_survives_new_database_session():
         queried = session2.query(Investigation).filter_by(investigation_number=inv_num).first()
         assert queried is not None
         assert queried.incident_title == "Session Persistence Test"
+
+
+def test_dashboard_activities_endpoint(db):
+    """Test retrieving recent audit activities from the dashboard activities endpoint."""
+    res = client.get("/api/dashboard/activities?limit=5")
+    assert res.status_code == 200
+    activities = res.json()
+    assert isinstance(activities, list)
+    assert len(activities) <= 5
+    if len(activities) > 0:
+        act = activities[0]
+        assert "activity_id" in act
+        assert "investigation_id" in act
+        assert "activity_type" in act
+        assert "description" in act
+        assert "created_at" in act
+

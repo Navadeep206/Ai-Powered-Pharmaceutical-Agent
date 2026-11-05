@@ -1,8 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useSelector, useDispatch } from 'react-redux';
 import {
-  loadInvestigation,
+  fetchInvestigationById,
+  fetchInvestigationRCA,
+  fetchInvestigationEvidence,
+  fetchInvestigationCAPA,
   updateInvestigationDetails,
   updateFiveWhysLevel,
   addFishboneCause,
@@ -12,6 +15,7 @@ import {
   updateEvidenceStatus,
   updateCAPA,
 } from '../../redux/slices/investigationSlice';
+import investigationService from '../../services/investigationService';
 import InvestigationHeader from '../../components/investigation/InvestigationHeader';
 import InvestigationTabs from '../../components/investigation/InvestigationTabs';
 import FiveWhysAnalysis from '../../components/investigation/FiveWhysAnalysis';
@@ -22,30 +26,36 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import Input from '../../components/common/Input';
 import StatusBadge from '../../components/common/StatusBadge';
 import Button from '../../components/common/Button';
+import LoadingSpinner from '../../components/common/LoadingSpinner';
+import EmptyState from '../../components/common/EmptyState';
 import {
-  FileText,
-  Sliders,
-  GitBranch,
-  ShieldAlert,
   Save,
   CheckCircle2,
-  Calendar,
-  Building2,
-  Clock,
-  Layers,
+  AlertCircle,
+  RotateCcw,
+  ArrowLeft,
 } from 'lucide-react';
 
 /**
  * RootIQ Comprehensive Investigation Workspace supporting Overview, RCA, Evidence, and CAPA.
+ * Fully integrated with the FastAPI backend and PostgreSQL database.
  */
 export default function InvestigationDetailPage() {
   const { id } = useParams();
   const dispatch = useDispatch();
 
-  const { currentInvestigation } = useSelector((state) => state.investigations);
+  const {
+    currentInvestigation,
+    detailLoading,
+    detailError,
+    detailStatusCode,
+  } = useSelector((state) => state.investigations);
+
   const [activeTab, setActiveTab] = useState('overview');
   const [rcaSubMethod, setRcaSubMethod] = useState('5whys'); // '5whys' | 'fishbone'
   const [overviewSavedToast, setOverviewSavedToast] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
 
   // Local state for editable Overview tab fields
   const [overviewForm, setOverviewForm] = useState({
@@ -61,25 +71,47 @@ export default function InvestigationDetailPage() {
     observedImpact: '',
   });
 
-  useEffect(() => {
+  const loadData = useCallback(() => {
     if (id) {
-      dispatch(loadInvestigation(id));
+      dispatch(fetchInvestigationById(id));
+      dispatch(fetchInvestigationRCA(id));
+      dispatch(fetchInvestigationEvidence(id));
+      dispatch(fetchInvestigationCAPA(id));
     }
   }, [id, dispatch]);
 
   useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  useEffect(() => {
     if (currentInvestigation) {
       setOverviewForm({
-        title: currentInvestigation.title || '',
-        batch: currentInvestigation.batch || '',
+        title: currentInvestigation.title || currentInvestigation.incident_title || '',
+        batch: currentInvestigation.batch || currentInvestigation.batch_number || '',
         department: currentInvestigation.department || '',
-        productName: currentInvestigation.productName || '',
+        productName: currentInvestigation.productName || currentInvestigation.product_name || '',
         equipment: currentInvestigation.equipment || '',
-        description: currentInvestigation.incidentInfo?.incidentDescription || '',
-        immediateAction: currentInvestigation.incidentInfo?.immediateActionTaken || '',
-        expectedCondition: currentInvestigation.context?.expectedCondition || '',
-        actualCondition: currentInvestigation.context?.actualCondition || '',
-        observedImpact: currentInvestigation.context?.observedImpact || '',
+        description:
+          currentInvestigation.incidentInfo?.incidentDescription ||
+          currentInvestigation.incident_description ||
+          '',
+        immediateAction:
+          currentInvestigation.incidentInfo?.immediateActionTaken ||
+          currentInvestigation.immediate_action_taken ||
+          '',
+        expectedCondition:
+          currentInvestigation.context?.expectedCondition ||
+          currentInvestigation.expected_condition ||
+          '',
+        actualCondition:
+          currentInvestigation.context?.actualCondition ||
+          currentInvestigation.actual_condition ||
+          '',
+        observedImpact:
+          currentInvestigation.context?.observedImpact ||
+          currentInvestigation.observed_impact ||
+          '',
       });
     }
   }, [currentInvestigation]);
@@ -88,37 +120,109 @@ export default function InvestigationDetailPage() {
     setOverviewForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSaveOverview = () => {
+  const handleSaveOverview = async () => {
     if (!id) return;
-    dispatch(
-      updateInvestigationDetails({
-        id,
-        incidentInfo: {
-          incidentTitle: overviewForm.title,
-          batchNumber: overviewForm.batch,
-          department: overviewForm.department,
-          productName: overviewForm.productName,
-          equipment: overviewForm.equipment,
-          incidentDescription: overviewForm.description,
-          immediateActionTaken: overviewForm.immediateAction,
-        },
-        context: {
-          expectedCondition: overviewForm.expectedCondition,
-          actualCondition: overviewForm.actualCondition,
-          observedImpact: overviewForm.observedImpact,
-        },
-      })
-    );
-    setOverviewSavedToast(true);
-    setTimeout(() => setOverviewSavedToast(false), 3000);
+    setIsSaving(true);
+    setSaveError(null);
+
+    const updatePayload = {
+      incident_title: overviewForm.title,
+      batch_number: overviewForm.batch,
+      department: overviewForm.department,
+      product_name: overviewForm.productName,
+      equipment: overviewForm.equipment,
+      incident_description: overviewForm.description,
+      immediate_action_taken: overviewForm.immediateAction,
+      expected_condition: overviewForm.expectedCondition,
+      actual_condition: overviewForm.actualCondition,
+      observed_impact: overviewForm.observedImpact,
+    };
+
+    try {
+      await investigationService.updateInvestigation(id, updatePayload);
+      dispatch(
+        updateInvestigationDetails({
+          id,
+          incidentInfo: {
+            incidentTitle: overviewForm.title,
+            batchNumber: overviewForm.batch,
+            department: overviewForm.department,
+            productName: overviewForm.productName,
+            equipment: overviewForm.equipment,
+            incidentDescription: overviewForm.description,
+            immediateActionTaken: overviewForm.immediateAction,
+          },
+          context: {
+            expectedCondition: overviewForm.expectedCondition,
+            actualCondition: overviewForm.actualCondition,
+            observedImpact: overviewForm.observedImpact,
+          },
+        })
+      );
+      setOverviewSavedToast(true);
+      setTimeout(() => setOverviewSavedToast(false), 3000);
+    } catch (err) {
+      setSaveError(err.message || 'Failed to save changes to the backend database.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  if (!currentInvestigation) {
+  // 1. Loading State
+  if (detailLoading) {
     return (
-      <div className="p-8 text-center text-[#64748B]">
-        Loading investigation workspace for {id}...
+      <div className="py-24 flex flex-col items-center justify-center space-y-3">
+        <LoadingSpinner size="lg" />
+        <p className="text-sm font-semibold text-[#142B45]">Loading investigation workspace...</p>
+        <p className="text-xs text-[#64748B]">Querying deviation record {id} from PostgreSQL database</p>
       </div>
     );
+  }
+
+  // 2. 404 Not Found State
+  if (detailStatusCode === 404 || (!currentInvestigation && detailError && detailError.includes('not found'))) {
+    return (
+      <div className="py-16 max-w-xl mx-auto">
+        <EmptyState
+          title="Investigation Not Found"
+          description={`Investigation '${id}' could not be found in the quality registry. It may have been archived or the ID may be mistyped.`}
+          action={
+            <Link to="/investigations">
+              <Button variant="primary" size="sm" leftIcon={ArrowLeft}>
+                Return to Investigations Registry
+              </Button>
+            </Link>
+          }
+        />
+      </div>
+    );
+  }
+
+  // 3. Error State (Server / Network Offline)
+  if (detailError && !currentInvestigation) {
+    return (
+      <div className="py-16 max-w-xl mx-auto space-y-4">
+        <div className="p-6 rounded-xl border border-[#FECACA] bg-[#FEF2F2] text-center space-y-3">
+          <AlertCircle className="w-10 h-10 text-[#DC2626] mx-auto" />
+          <h3 className="text-base font-bold text-[#991B1B]">Unable to Load Investigation</h3>
+          <p className="text-xs text-[#B91C1C] max-w-md mx-auto">{detailError}</p>
+          <div className="pt-2 flex items-center justify-center gap-2">
+            <Button variant="secondary" size="sm" leftIcon={RotateCcw} onClick={loadData}>
+              Retry Connection
+            </Button>
+            <Link to="/investigations">
+              <Button variant="ghost" size="sm" leftIcon={ArrowLeft}>
+                Back to List
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentInvestigation) {
+    return null;
   }
 
   return (
@@ -144,7 +248,7 @@ export default function InvestigationDetailPage() {
               <div>
                 <CardTitle>Manufacturing Incident Record</CardTitle>
                 <CardDescription>
-                  Verified details, affected batches, and immediate containment measures
+                  Verified details, affected batches, and immediate containment measures (Database Persisted)
                 </CardDescription>
               </div>
               <StatusBadge variant="teal" size="sm">
@@ -153,6 +257,13 @@ export default function InvestigationDetailPage() {
             </CardHeader>
 
             <CardContent className="space-y-4">
+              {saveError && (
+                <div className="p-3 rounded-lg border border-[#FECACA] bg-[#FEF2F2] text-xs text-[#991B1B] flex items-center space-x-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-[#DC2626]" />
+                  <span>{saveError}</span>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <Input
                   label="Deviation Reference ID"
@@ -235,10 +346,10 @@ export default function InvestigationDetailPage() {
               <div className="text-xs text-[#64748B]">
                 {overviewSavedToast ? (
                   <span className="text-[#059669] font-semibold flex items-center">
-                    <CheckCircle2 className="w-4 h-4 mr-1" /> Investigation Details Saved
+                    <CheckCircle2 className="w-4 h-4 mr-1" /> Investigation Details Saved in Database
                   </span>
                 ) : (
-                  <span>Modifications persist across investigation tabs.</span>
+                  <span>Modifications persist in PostgreSQL across investigation sessions.</span>
                 )}
               </div>
 
@@ -248,8 +359,9 @@ export default function InvestigationDetailPage() {
                   size="sm"
                   leftIcon={Save}
                   onClick={handleSaveOverview}
+                  disabled={isSaving}
                 >
-                  Save Overview Details
+                  {isSaving ? 'Saving...' : 'Save Overview Details'}
                 </Button>
                 <Button
                   variant="accent"
@@ -304,17 +416,15 @@ export default function InvestigationDetailPage() {
 
           {rcaSubMethod === '5whys' ? (
             <FiveWhysAnalysis
-              fiveWhys={currentInvestigation.fiveWhys}
+              fiveWhys={currentInvestigation.fiveWhys || []}
               onSaveLevel={(idx, levelData) =>
                 dispatch(updateFiveWhysLevel({ id, levelIndex: idx, ...levelData }))
               }
-              onSaveAll={() => {
-                // Already synchronized via state
-              }}
+              onSaveAll={() => {}}
             />
           ) : (
             <FishboneAnalysis
-              fishbone={currentInvestigation.fishbone}
+              fishbone={currentInvestigation.fishbone || {}}
               onAddCause={(category, cause, status) =>
                 dispatch(addFishboneCause({ id, category, cause, status }))
               }

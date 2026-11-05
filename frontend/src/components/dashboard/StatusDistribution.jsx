@@ -1,15 +1,54 @@
 import React from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../common/Card';
 import StatusBadge from '../common/StatusBadge';
-import { PieChart, Info } from 'lucide-react';
-import { STATUS_DISTRIBUTION } from '../../utils/demoData';
+import { Info } from 'lucide-react';
 
 /**
  * CSS-based Investigation Status Distribution Chart with proportional segments,
- * metrics breakdown, and legend.
+ * metrics breakdown, and legend derived from PostgreSQL database summary.
  */
-export default function StatusDistribution() {
-  const totalCount = STATUS_DISTRIBUTION.reduce((acc, curr) => acc + curr.count, 0);
+export default function StatusDistribution({ summary }) {
+  const openCount = summary?.open_investigations || 0;
+  const underInvCount = summary?.investigations_under_investigation || 0;
+  const pendingCapaCount = summary?.investigations_pending_capa || 0;
+  const completedCount = summary?.completed_investigations || 0;
+  const totalCount = summary?.total_investigations || (openCount + underInvCount + pendingCapaCount + completedCount);
+
+  const calculatePct = (count) => {
+    if (!totalCount || totalCount <= 0) return 0;
+    return Math.round((count / totalCount) * 100);
+  };
+
+  const distribution = [
+    {
+      status: 'Under Investigation',
+      count: underInvCount,
+      percentage: calculatePct(underInvCount),
+      color: '#0F9D91',
+      bgColor: 'bg-[#0F9D91]',
+    },
+    {
+      status: 'Open',
+      count: openCount,
+      percentage: calculatePct(openCount),
+      color: '#D97706',
+      bgColor: 'bg-[#D97706]',
+    },
+    {
+      status: 'Pending Review',
+      count: pendingCapaCount,
+      percentage: calculatePct(pendingCapaCount),
+      color: '#2563EB',
+      bgColor: 'bg-[#2563EB]',
+    },
+    {
+      status: 'Closed',
+      count: completedCount,
+      percentage: calculatePct(completedCount),
+      color: '#059669',
+      bgColor: 'bg-[#059669]',
+    },
+  ];
 
   return (
     <Card className="h-full flex flex-col">
@@ -17,11 +56,11 @@ export default function StatusDistribution() {
         <div>
           <CardTitle>Investigation Status Distribution</CardTitle>
           <CardDescription>
-            Live allocation of active manufacturing deviations (Demonstration Pool: {totalCount})
+            Live allocation of manufacturing deviations ({totalCount} Total Recorded)
           </CardDescription>
         </div>
-        <StatusBadge variant="neutral" size="sm">
-          Demonstration Data
+        <StatusBadge variant="teal" size="sm">
+          Live Database Metrics
         </StatusBadge>
       </CardHeader>
 
@@ -30,24 +69,30 @@ export default function StatusDistribution() {
         <div>
           <div className="flex items-center justify-between text-xs text-[#64748B] mb-2 font-medium">
             <span>Portfolio Breakdown</span>
-            <span>100% Accounted</span>
+            <span>{totalCount > 0 ? '100% Accounted' : '0 Records'}</span>
           </div>
 
           <div className="h-4 w-full bg-[#F1F5F9] rounded-full overflow-hidden flex shadow-inner p-0.5 gap-0.5">
-            {STATUS_DISTRIBUTION.map((item) => (
-              <div
-                key={item.status}
-                style={{ width: `${item.percentage}%` }}
-                className={`h-full rounded-sm transition-all duration-300 hover:opacity-90 relative group ${item.bgColor}`}
-                title={`${item.status}: ${item.count} (${item.percentage}%)`}
-              />
-            ))}
+            {totalCount > 0 ? (
+              distribution.map((item) => (
+                <div
+                  key={item.status}
+                  style={{ width: `${item.percentage}%` }}
+                  className={`h-full rounded-sm transition-all duration-300 hover:opacity-90 relative group ${item.bgColor}`}
+                  title={`${item.status}: ${item.count} (${item.percentage}%)`}
+                />
+              ))
+            ) : (
+              <div className="h-full w-full bg-[#E2E8F0] rounded-sm text-center text-[10px] text-[#94A3B8] flex items-center justify-center">
+                No active records
+              </div>
+            )}
           </div>
         </div>
 
         {/* Legend & Metrics Grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {STATUS_DISTRIBUTION.map((item) => (
+          {distribution.map((item) => (
             <div
               key={item.status}
               className="p-3 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] flex flex-col justify-between"
@@ -82,4 +127,3 @@ export default function StatusDistribution() {
     </Card>
   );
 }
-

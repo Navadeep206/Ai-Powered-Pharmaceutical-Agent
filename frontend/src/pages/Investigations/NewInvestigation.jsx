@@ -11,6 +11,7 @@ import {
   setExtractedData,
   updateExtractedField,
   resetDraftIntake,
+  createInvestigationAsync,
   createNewInvestigationFromIntake,
 } from '../../redux/slices/investigationSlice';
 import PageHeader from '../../components/common/PageHeader';
@@ -52,6 +53,7 @@ export default function NewInvestigationPage() {
 
   const [validationError, setValidationError] = useState(null);
   const [draftSavedToast, setDraftSavedToast] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Validate the active intake method before transitioning to simulated extraction
   const handleAnalyzeIncident = () => {
@@ -104,11 +106,45 @@ export default function NewInvestigationPage() {
     setTimeout(() => setDraftSavedToast(false), 3000);
   };
 
-  const handleContinueToRCA = () => {
+  const handleContinueToRCA = async () => {
     if (!extractedData) return;
-    // Dispatch creation of new investigation record in local state and navigate to workspace
-    const newId = dispatch(createNewInvestigationFromIntake({ extractedData })).payload;
-    navigate(`/investigations/${newId || 'INV-2026-001'}`);
+    setIsSubmitting(true);
+    setValidationError(null);
+
+    const payload = {
+      incident_title: extractedData.incidentInfo.incidentTitle || 'New Quality Deviation',
+      incident_description:
+        extractedData.incidentInfo.incidentDescription ||
+        'Initial deviation narrative recorded during incident intake.',
+      severity: ['Critical', 'High', 'Medium', 'Low'].includes(extractedData.incidentInfo.severity)
+        ? extractedData.incidentInfo.severity
+        : 'Medium',
+      batch_number: extractedData.incidentInfo.batchNumber || null,
+      product_name: extractedData.incidentInfo.productName || null,
+      department: extractedData.incidentInfo.department || null,
+      equipment: extractedData.incidentInfo.equipment || null,
+      deviation_id: extractedData.incidentInfo.deviationId || null,
+      immediate_action_taken: extractedData.incidentInfo.immediateActionTaken || null,
+      expected_condition: extractedData.context?.expectedCondition || null,
+      actual_condition: extractedData.context?.actualCondition || null,
+      observed_impact: extractedData.context?.observedImpact || null,
+      affected_process: extractedData.context?.affectedProcess || null,
+      initial_observations: extractedData.context?.initialObservations || null,
+    };
+
+    try {
+      const resultAction = await dispatch(createInvestigationAsync(payload));
+      if (createInvestigationAsync.fulfilled.match(resultAction)) {
+        const created = resultAction.payload;
+        navigate(`/investigations/${encodeURIComponent(created.id || created.investigation_id)}`);
+      } else {
+        setValidationError(resultAction.payload?.message || 'Failed to persist investigation in database.');
+      }
+    } catch (err) {
+      setValidationError(err.message || 'An unexpected error occurred while saving investigation.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleResetIntake = () => {
@@ -279,13 +315,21 @@ export default function NewInvestigationPage() {
 
       {/* State C: Structured Extraction Review Experience */}
       {extractionState === 'extracted' && extractedData && (
-        <ExtractionReviewForm
-          extractedData={extractedData}
-          onUpdateField={handleUpdateExtractedField}
-          onSaveDraft={handleSaveDraft}
-          onContinueToRCA={handleContinueToRCA}
-          isDraftSaved={draftSavedToast}
-        />
+        <div className="space-y-4">
+          {validationError && (
+            <div className="p-4 rounded-xl border border-[#FECACA] bg-[#FEF2F2] text-xs text-[#991B1B] flex items-center space-x-2">
+              <AlertCircle className="w-5 h-5 shrink-0 text-[#DC2626]" />
+              <span className="font-medium">{validationError}</span>
+            </div>
+          )}
+          <ExtractionReviewForm
+            extractedData={extractedData}
+            onUpdateField={handleUpdateExtractedField}
+            onSaveDraft={handleSaveDraft}
+            onContinueToRCA={handleContinueToRCA}
+            isDraftSaved={draftSavedToast}
+          />
+        </div>
       )}
     </div>
   );

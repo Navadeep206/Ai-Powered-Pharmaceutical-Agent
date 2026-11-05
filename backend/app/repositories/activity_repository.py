@@ -37,6 +37,20 @@ class ActivityRepository:
         )
         return list(db.scalars(stmt).all())
 
+    def list_recent(
+        self,
+        db: Session,
+        limit: int = 10,
+    ) -> List[InvestigationActivity]:
+        """Fetch the chronological activity log across all investigations."""
+        stmt = (
+            select(InvestigationActivity)
+            .order_by(InvestigationActivity.created_at.desc())
+            .limit(limit)
+        )
+        return list(db.scalars(stmt).all())
+
+
 
 # Singleton instance
 activity_repository = ActivityRepository()

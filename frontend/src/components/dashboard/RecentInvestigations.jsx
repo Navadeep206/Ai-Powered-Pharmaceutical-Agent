@@ -1,32 +1,19 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '../common/Card';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../common/Table';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../common/Card';
 import StatusBadge from '../common/StatusBadge';
 import Button from '../common/Button';
 import EmptyState from '../common/EmptyState';
-import { ArrowRight, ExternalLink, AlertTriangle } from 'lucide-react';
-import { DEMO_INVESTIGATIONS } from '../../utils/demoData';
-
-const SEVERITY_BADGE_MAP = {
-  Critical: 'danger',
-  High: 'warning',
-  Medium: 'info',
-  Low: 'neutral',
-};
-
-const STATUS_BADGE_MAP = {
-  Open: 'warning',
-  'Under Investigation': 'teal',
-  'Pending Review': 'info',
-  Closed: 'success',
-};
+import LoadingSpinner from '../common/LoadingSpinner';
+import { ArrowRight, ExternalLink } from 'lucide-react';
+import { SEVERITY_BADGE_MAP, STATUS_BADGE_MAP } from '../../utils/normalizers';
 
 /**
- * Recent Investigations Table component displaying the latest 5 deviation records.
+ * Recent Investigations Table component displaying the latest deviation records
+ * fetched directly from the PostgreSQL backend API.
  */
-export default function RecentInvestigations() {
-  const recentRecords = DEMO_INVESTIGATIONS.slice(0, 5);
+export default function RecentInvestigations({ investigations = [], loading = false, totalCount = 0 }) {
+  const recentRecords = (investigations || []).slice(0, 5);
 
   return (
     <Card>
@@ -39,24 +26,31 @@ export default function RecentInvestigations() {
         </div>
         <Link to="/investigations">
           <Button variant="secondary" size="xs" rightIcon={ArrowRight}>
-            View All ({DEMO_INVESTIGATIONS.length})
+            View All ({totalCount || investigations.length})
           </Button>
         </Link>
       </CardHeader>
 
       <CardContent noPadding>
-        {recentRecords.length === 0 ? (
-          <EmptyState
-            title="No recent investigations"
-            description="All manufacturing deviations have been resolved or archived."
-            action={
-              <Link to="/investigations/new">
-                <Button variant="primary" size="sm">
-                  Create New Investigation
-                </Button>
-              </Link>
-            }
-          />
+        {loading ? (
+          <div className="py-12 flex flex-col items-center justify-center">
+            <LoadingSpinner size="md" />
+            <p className="text-xs text-[#64748B] mt-2 font-medium">Loading recent investigations from database...</p>
+          </div>
+        ) : recentRecords.length === 0 ? (
+          <div className="py-8">
+            <EmptyState
+              title="No recent investigations"
+              description="No deviation investigations are currently recorded in the PostgreSQL database."
+              action={
+                <Link to="/investigations/new">
+                  <Button variant="primary" size="sm">
+                    Create New Investigation
+                  </Button>
+                </Link>
+              }
+            />
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm text-[#334155]">
@@ -86,10 +80,10 @@ export default function RecentInvestigations() {
                       <div className="font-medium text-[#142B45] truncate" title={inv.title}>
                         {inv.title}
                       </div>
-                      <div className="text-xs text-[#64748B]">Batch: {inv.batch}</div>
+                      <div className="text-xs text-[#64748B]">Batch: {inv.batch || 'N/A'}</div>
                     </td>
                     <td className="px-5 py-3.5 text-xs text-[#475569]">
-                      {inv.department}
+                      {inv.department || 'General'}
                     </td>
                     <td className="px-5 py-3.5">
                       <StatusBadge
@@ -107,13 +101,13 @@ export default function RecentInvestigations() {
                         {inv.status}
                       </StatusBadge>
                     </td>
-                    <td className="px-5 py-3.5 text-xs text-[#64748B] font-mono whitespace-nowrap">
-                      {inv.date}
+                    <td className="px-5 py-3.5 text-xs text-[#64748B] whitespace-nowrap">
+                      {inv.date || 'N/A'}
                     </td>
                     <td className="px-5 py-3.5 text-right whitespace-nowrap">
-                      <Link to={`/investigations/${inv.id}`}>
+                      <Link to={`/investigations/${encodeURIComponent(inv.id)}`}>
                         <Button variant="ghost" size="xs" rightIcon={ExternalLink}>
-                          View Details
+                          Open
                         </Button>
                       </Link>
                     </td>
@@ -124,19 +118,6 @@ export default function RecentInvestigations() {
           </div>
         )}
       </CardContent>
-
-      <CardFooter>
-        <span className="text-xs text-[#64748B]">
-          Showing 5 most recent records &bull; Demonstration Dataset
-        </span>
-        <Link
-          to="/investigations"
-          className="text-xs font-semibold text-[#0F9D91] hover:text-[#0A736A] inline-flex items-center"
-        >
-          Explore Full Registry <ArrowRight className="w-3.5 h-3.5 ml-1" />
-        </Link>
-      </CardFooter>
     </Card>
   );
 }
-

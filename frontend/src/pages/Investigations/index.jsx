@@ -1,69 +1,61 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { useSelector, useDispatch } from 'react-redux';
 import PageHeader from '../../components/common/PageHeader';
 import Button from '../../components/common/Button';
 import StatusBadge from '../../components/common/StatusBadge';
 import Input from '../../components/common/Input';
 import Select from '../../components/common/Select';
 import EmptyState from '../../components/common/EmptyState';
+import LoadingSpinner from '../../components/common/LoadingSpinner';
 import { Card, CardContent } from '../../components/common/Card';
+import { fetchInvestigations } from '../../redux/slices/investigationSlice';
+import { SEVERITY_BADGE_MAP, STATUS_BADGE_MAP } from '../../utils/normalizers';
 import {
   PlusCircle,
   Search,
-  Filter,
-  ArrowRight,
   ExternalLink,
   RotateCcw,
   SlidersHorizontal,
+  AlertCircle,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
-import { DEMO_INVESTIGATIONS } from '../../utils/demoData';
-
-const SEVERITY_BADGE_MAP = {
-  Critical: 'danger',
-  High: 'warning',
-  Medium: 'info',
-  Low: 'neutral',
-};
-
-const STATUS_BADGE_MAP = {
-  Open: 'warning',
-  'Under Investigation': 'teal',
-  'Pending Review': 'info',
-  Closed: 'success',
-};
 
 /**
- * Investigations Master Listing with functional local search and multi-criteria filters.
+ * Investigations Master Listing connected directly to the FastAPI backend.
+ * Supports backend search, status/severity filtering, pagination, and error handling.
  */
 export default function InvestigationsPage() {
+  const dispatch = useDispatch();
+
+  const {
+    investigations,
+    pagination,
+    listLoading,
+    listError,
+  } = useSelector((state) => state.investigations);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [severityFilter, setSeverityFilter] = useState('ALL');
+  const [currentPage, setCurrentPage] = useState(1);
 
-  // Multi-criteria filter executed locally against demonstration dataset
-  const filteredInvestigations = useMemo(() => {
-    return DEMO_INVESTIGATIONS.filter((inv) => {
-      // 1. Keyword search (ID, Title, Department, Batch, Reporter)
-      const term = searchTerm.trim().toLowerCase();
-      const matchesSearch =
-        !term ||
-        inv.id.toLowerCase().includes(term) ||
-        inv.title.toLowerCase().includes(term) ||
-        inv.department.toLowerCase().includes(term) ||
-        inv.batch.toLowerCase().includes(term) ||
-        inv.reportedBy.toLowerCase().includes(term);
+  const loadData = useCallback(() => {
+    dispatch(
+      fetchInvestigations({
+        page: currentPage,
+        limit: 15,
+        search: searchTerm,
+        status: statusFilter,
+        severity: severityFilter,
+      })
+    );
+  }, [dispatch, currentPage, searchTerm, statusFilter, severityFilter]);
 
-      // 2. Status filter
-      const matchesStatus =
-        statusFilter === 'ALL' || inv.status === statusFilter;
-
-      // 3. Severity filter
-      const matchesSeverity =
-        severityFilter === 'ALL' || inv.severity === severityFilter;
-
-      return matchesSearch && matchesStatus && matchesSeverity;
-    });
-  }, [searchTerm, statusFilter, severityFilter]);
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const hasActiveFilters =
     searchTerm.trim() !== '' || statusFilter !== 'ALL' || severityFilter !== 'ALL';
@@ -72,6 +64,13 @@ export default function InvestigationsPage() {
     setSearchTerm('');
     setStatusFilter('ALL');
     setSeverityFilter('ALL');
+    setCurrentPage(1);
+  };
+
+  const handlePageChange = (newPage) => {
+    if (newPage >= 1 && (!pagination || newPage <= pagination.total_pages)) {
+      setCurrentPage(newPage);
+    }
   };
 
   return (
@@ -85,8 +84,8 @@ export default function InvestigationsPage() {
           { label: 'Investigations' },
         ]}
         badge={
-          <StatusBadge variant="teal">
-            {DEMO_INVESTIGATIONS.length} Total Records
+          <StatusBadge variant={listError ? 'danger' : 'teal'}>
+            {pagination ? `${pagination.total} Total Records` : `${investigations.length} Records`}
           </StatusBadge>
         }
         actions={
@@ -107,7 +106,10 @@ export default function InvestigationsPage() {
               <Input
                 placeholder="Search by ID (INV-...), batch, title, or department..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setCurrentPage(1);
+                }}
                 leftIcon={Search}
               />
             </div>
@@ -116,7 +118,10 @@ export default function InvestigationsPage() {
             <div className="w-full sm:w-48">
               <Select
                 value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
+                onChange={(e) => {
+                  setStatusFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
                 options={[
                   { value: 'ALL', label: 'All Statuses' },
                   { value: 'Open', label: 'Open' },
@@ -131,7 +136,10 @@ export default function InvestigationsPage() {
             <div className="w-full sm:w-44">
               <Select
                 value={severityFilter}
-                onChange={(e) => setSeverityFilter(e.target.value)}
+                onChange={(e) => {
+                  setSeverityFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
                 options={[
                   { value: 'ALL', label: 'All Severities' },
                   { value: 'Critical', label: 'Critical' },
@@ -161,8 +169,8 @@ export default function InvestigationsPage() {
             <div className="flex items-center space-x-2">
               <SlidersHorizontal className="w-3.5 h-3.5 text-[#0F9D91]" />
               <span>
-                Showing <strong className="text-[#142B45]">{filteredInvestigations.length}</strong> of{' '}
-                {DEMO_INVESTIGATIONS.length} records
+                Showing <strong className="text-[#142B45]">{investigations.length}</strong> of{' '}
+                {pagination?.total ?? investigations.length} records
               </span>
             </div>
 
@@ -175,18 +183,57 @@ export default function InvestigationsPage() {
         </CardContent>
       </Card>
 
-      {/* Investigations Table or Empty State */}
+      {/* Error Banner with Retry */}
+      {listError && (
+        <div className="p-4 rounded-xl border border-[#FECACA] bg-[#FEF2F2] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-sm text-[#991B1B]">
+          <div className="flex items-center space-x-2.5">
+            <AlertCircle className="w-5 h-5 shrink-0 text-[#DC2626]" />
+            <div>
+              <p className="font-semibold">Failed to Load Quality Investigations</p>
+              <p className="text-xs text-[#B91C1C] mt-0.5">{listError}</p>
+            </div>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            leftIcon={RotateCcw}
+            onClick={loadData}
+            className="shrink-0 bg-white border-[#FCA5A5] hover:bg-[#FEE2E2]"
+          >
+            Retry Connection
+          </Button>
+        </div>
+      )}
+
+      {/* Investigations Table or Loading / Empty State */}
       <Card>
         <CardContent noPadding>
-          {filteredInvestigations.length === 0 ? (
+          {listLoading ? (
+            <div className="py-16 flex flex-col items-center justify-center space-y-3">
+              <LoadingSpinner size="lg" />
+              <p className="text-sm font-medium text-[#64748B]">Querying PostgreSQL quality records...</p>
+            </div>
+          ) : investigations.length === 0 ? (
             <div className="p-8">
               <EmptyState
-                title="No investigations match criteria"
-                description="We couldn't find any records matching your search query or selected filters. Try broadening your keywords or resetting filters."
+                title="No investigations found"
+                description={
+                  hasActiveFilters
+                    ? "We couldn't find any deviation records matching your search query or selected filters. Try broadening your keywords or clearing filters."
+                    : "No quality deviation investigations are currently stored in the database."
+                }
                 action={
-                  <Button variant="secondary" size="sm" leftIcon={RotateCcw} onClick={resetFilters}>
-                    Clear All Filters
-                  </Button>
+                  hasActiveFilters ? (
+                    <Button variant="secondary" size="sm" leftIcon={RotateCcw} onClick={resetFilters}>
+                      Clear All Filters
+                    </Button>
+                  ) : (
+                    <Link to="/investigations/new">
+                      <Button variant="primary" size="sm" leftIcon={PlusCircle}>
+                        Create Investigation
+                      </Button>
+                    </Link>
+                  )
                 }
               />
             </div>
@@ -205,7 +252,7 @@ export default function InvestigationsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#F1F5F9] bg-white">
-                  {filteredInvestigations.map((inv) => (
+                  {investigations.map((inv) => (
                     <tr
                       key={inv.id}
                       className="hover:bg-[#F8FAFC] transition-colors duration-150"
@@ -217,16 +264,18 @@ export default function InvestigationsPage() {
                       </td>
 
                       <td className="px-5 py-4 max-w-sm">
-                        <div className="font-semibold text-[#142B45]">{inv.title}</div>
+                        <div className="font-semibold text-[#142B45] truncate" title={inv.title}>
+                          {inv.title}
+                        </div>
                         <div className="text-xs text-[#64748B] mt-0.5 flex items-center space-x-2">
-                          <span>Batch: <strong className="text-[#334155]">{inv.batch}</strong></span>
+                          <span>Batch: <strong className="text-[#334155]">{inv.batch || 'N/A'}</strong></span>
                           <span>&bull;</span>
                           <span>Reported by: {inv.reportedBy}</span>
                         </div>
                       </td>
 
                       <td className="px-5 py-4 text-xs text-[#475569] font-medium">
-                        {inv.department}
+                        {inv.department || 'General'}
                       </td>
 
                       <td className="px-5 py-4">
@@ -248,11 +297,11 @@ export default function InvestigationsPage() {
                       </td>
 
                       <td className="px-5 py-4 text-xs text-[#64748B] font-mono whitespace-nowrap">
-                        {inv.date}
+                        {inv.date || 'N/A'}
                       </td>
 
                       <td className="px-5 py-4 text-right whitespace-nowrap">
-                        <Link to={`/investigations/${inv.id}`}>
+                        <Link to={`/investigations/${encodeURIComponent(inv.id)}`}>
                           <Button variant="ghost" size="xs" rightIcon={ExternalLink}>
                             Open Workspace
                           </Button>
@@ -262,6 +311,37 @@ export default function InvestigationsPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* Pagination Controls */}
+          {pagination && pagination.total_pages > 1 && (
+            <div className="p-4 border-t border-[#E2E8F0] bg-[#F8FAFC] flex items-center justify-between text-xs text-[#64748B]">
+              <span>
+                Page <strong className="text-[#142B45]">{pagination.page}</strong> of{' '}
+                <strong className="text-[#142B45]">{pagination.total_pages}</strong> ({pagination.total} total)
+              </span>
+
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="secondary"
+                  size="xs"
+                  leftIcon={ChevronLeft}
+                  disabled={!pagination.has_prev}
+                  onClick={() => handlePageChange(currentPage - 1)}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="xs"
+                  rightIcon={ChevronRight}
+                  disabled={!pagination.has_next}
+                  onClick={() => handlePageChange(currentPage + 1)}
+                >
+                  Next
+                </Button>
+              </div>
             </div>
           )}
         </CardContent>
