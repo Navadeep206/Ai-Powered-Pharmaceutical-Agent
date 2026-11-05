@@ -75,3 +75,4 @@ def rca_finalization_node(state: RCAWorkflowState) -> Dict[str, Any]:
         "persisted_in_db": persisted_in_db,
         "rca_analysis_id": rca_analysis_id,
     }
+

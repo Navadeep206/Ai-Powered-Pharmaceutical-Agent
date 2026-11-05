@@ -218,3 +218,4 @@ def synthesis_node(state: RCAWorkflowState) -> Dict[str, Any]:
         "contributing_factors": contributing_factors,
         "rca_warnings": rca_warnings,
     }
+

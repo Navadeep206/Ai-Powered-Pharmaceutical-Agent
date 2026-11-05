@@ -1,13 +1,117 @@
 """Corrective and Preventive Actions (CAPA) route definitions for RootIQ."""
 
-from typing import List
-from fastapi import APIRouter, Depends, status
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from app.agents.graph import resume_capa_workflow
 from app.database.session import get_db
-from app.schemas.capa import CAPACreate, CAPAResponse, CAPAStatusUpdate
+from app.schemas.capa import (
+    CAPACreate,
+    CAPAGenerateRequest,
+    CAPAResponse,
+    CAPAReviewRequest,
+    CAPAStatusUpdate,
+    CAPAWorkflowResult,
+)
 from app.services.capa_service import capa_service
 
 router = APIRouter(prefix="/investigations/{investigation_id}/capa", tags=["CAPA"])
+
+
+@router.post(
+    "/generate",
+    response_model=CAPAWorkflowResult,
+    status_code=status.HTTP_200_OK,
+    summary="Generate AI-assisted CAPA recommendations",
+    description="Executes LangGraph CAPA generation and validation, pausing at human QA review boundary.",
+)
+async def generate_capa(
+    investigation_id: str,
+    payload: Optional[CAPAGenerateRequest] = None,
+    db: Session = Depends(get_db),
+):
+    """Initiates AI CAPA generation workflow with Groq LLM and pauses at the human QA review boundary."""
+    problem_statement = payload.problem_statement if payload else None
+    persist = payload.persist if payload else True
+    return capa_service.generate_capa(
+        db=db,
+        investigation_id=investigation_id,
+        problem_statement=problem_statement,
+        persist=persist,
+    )
+
+
+@router.post(
+    "/review",
+    response_model=CAPAWorkflowResult,
+    status_code=status.HTTP_200_OK,
+    summary="Submit human QA review decisions for CAPA recommendations",
+    description="Applies human review decisions (Approval, Rejection, Modification) and resumes paused LangGraph thread if provided.",
+)
+async def review_capa(
+    investigation_id: str,
+    payload: CAPAReviewRequest,
+    db: Session = Depends(get_db),
+):
+    """Records human review decisions and resumes workflow if thread_id is specified."""
+    if payload.thread_id:
+        return resume_capa_workflow(
+            thread_id=payload.thread_id,
+            review_request=payload,
+            db=db,
+        )
+
+    # If no thread_id, apply decisions directly to existing records in PostgreSQL
+    updated_actions = capa_service.apply_capa_review_decisions(
+        db=db,
+        investigation_id=investigation_id,
+        decisions=payload.decisions,
+        reviewer_comments=payload.general_comments,
+    )
+
+    all_actions = capa_service.list_capa(db, investigation_id)
+    # Convert list to recommendations representation
+    return CAPAWorkflowResult(
+        workflow_id=f"WF-REV-{investigation_id[:8]}",
+        investigation_id=investigation_id,
+        thread_id=payload.thread_id or "direct-review",
+        rca_summary=f"Human review applied for {len(payload.decisions)} CAPA recommendations.",
+        capa_recommendations=[],
+        approved_actions=[],
+        rejected_actions=[],
+        pending_actions=[],
+        capa_generation_status="COMPLETED",
+        capa_review_status="REVIEWED",
+        human_review_required=False,
+        workflow_completion_status="COMPLETED",
+        persisted_in_db=True,
+        persisted_capa_ids=[a.action_id for a in all_actions],
+    )
+
+
+@router.post(
+    "/resume",
+    response_model=CAPAWorkflowResult,
+    status_code=status.HTTP_200_OK,
+    summary="Resume paused CAPA workflow with review decisions",
+    description="Resumes a checkpointed LangGraph thread waiting at the human review boundary.",
+)
+async def resume_capa(
+    investigation_id: str,
+    payload: CAPAReviewRequest,
+    db: Session = Depends(get_db),
+):
+    """Resumes paused LangGraph thread using the provided thread_id and review decisions."""
+    if not payload.thread_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Field 'thread_id' is required to resume a paused CAPA workflow.",
+        )
+    return resume_capa_workflow(
+        thread_id=payload.thread_id,
+        review_request=payload,
+        db=db,
+    )
 
 
 @router.post(
@@ -66,3 +170,4 @@ async def update_capa_status(
         capa_id=capa_id,
         payload=payload,
     )
+

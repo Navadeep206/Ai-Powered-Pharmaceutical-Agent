@@ -22,10 +22,14 @@ from app.repositories.capa_repository import capa_repository
 from app.repositories.investigation_repository import investigation_repository
 from app.schemas.capa import (
     CAPACreate,
+    CAPARecommendation,
     CAPAResponse,
+    CAPAReviewItemDecision,
+    CAPAReviewRequest,
     CAPAStatusEnum,
     CAPAStatusUpdate,
     CAPATypeEnum,
+    CAPAWorkflowResult,
 )
 
 logger = get_logger("services.capa")
@@ -289,6 +293,259 @@ class CAPAService:
         except Exception:
             db.rollback()
             raise
+
+    def persist_capa_recommendations(
+        self,
+        db: Session,
+        investigation_id: str,
+        recommendations: List[CAPARecommendation],
+    ) -> List[CapaAction]:
+        """Atomically persist proposed CAPA recommendations to PostgreSQL without overwriting approved actions."""
+        inv = investigation_repository.get_by_id(db, investigation_id)
+        if not inv:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Investigation '{investigation_id}' not found.",
+            )
+
+        existing_actions = capa_repository.list_by_investigation(db, inv.id)
+        existing_by_desc = {a.description.strip().lower(): a for a in existing_actions}
+
+        persisted: List[CapaAction] = []
+        try:
+            for rec in recommendations:
+                desc_key = rec.description.strip().lower()
+                existing = existing_by_desc.get(desc_key)
+
+                # If existing is already approved or completed, protect it from overwrite
+                if existing:
+                    if existing.action_status in (
+                        CAPAStatusEnum.APPROVED,
+                        CAPAStatusEnum.IN_PROGRESS,
+                        CAPAStatusEnum.COMPLETED,
+                        CAPAStatusEnum.CLOSED,
+                    ):
+                        logger.info("Preserving existing approved/completed CAPA %s", existing.id)
+                        persisted.append(existing)
+                        continue
+                    else:
+                        existing.action_owner = rec.assigned_owner or rec.suggested_owner_role
+                        if rec.actual_target_date:
+                            existing.target_date = rec.actual_target_date
+                        existing.action_status = rec.review_status
+                        db.flush()
+                        persisted.append(existing)
+                        continue
+
+                # Target date calculation
+                target_d = rec.actual_target_date
+                if not target_d:
+                    from datetime import timedelta
+                    target_d = date.today() + timedelta(days=30)
+
+                eff = rec.effectiveness_verification
+                eff_text = (
+                    f"Method: {eff.verification_method} | "
+                    f"Target: {eff.measurable_outcome} | "
+                    f"Evidence: {eff.evidence_required} | "
+                    f"Verifier: {eff.suggested_verifier_role} | "
+                    f"Timeframe: {eff.verification_timeframe} | "
+                    f"Failure Criteria: {eff.failure_criteria}"
+                )
+
+                root_cause_uuid = None
+                if rec.related_root_cause_id:
+                    try:
+                        cand_uuid = uuid.UUID(rec.related_root_cause_id)
+                        if db.get(FishboneCause, cand_uuid):
+                            root_cause_uuid = cand_uuid
+                    except Exception:
+                        pass
+
+                capa_entity = CapaAction(
+                    investigation_id=inv.id,
+                    related_root_cause_id=root_cause_uuid,
+                    action_type=rec.action_type,
+                    description=rec.description.strip(),
+                    action_owner=rec.assigned_owner or rec.suggested_owner_role,
+                    target_date=target_d,
+                    effectiveness_verification=eff_text,
+                    action_status=rec.review_status or CAPAStatusEnum.PROPOSED,
+                )
+                db.add(capa_entity)
+                db.flush()
+                persisted.append(capa_entity)
+                existing_by_desc[desc_key] = capa_entity
+
+            activity_repository.create(
+                db,
+                {
+                    "investigation_id": inv.id,
+                    "activity_type": "AI_CAPA_PROPOSED",
+                    "description": f"Persisted {len(persisted)} reviewable CAPA suggestions for {inv.investigation_number}.",
+                    "actor_identifier": "RootIQ AI Engine",
+                    "activity_metadata": {
+                        "count": len(persisted),
+                    },
+                },
+            )
+
+            db.commit()
+            for p in persisted:
+                db.refresh(p)
+            return persisted
+        except Exception:
+            db.rollback()
+            raise
+
+    def apply_capa_review_decisions(
+        self,
+        db: Session,
+        investigation_id: str,
+        decisions: List[CAPAReviewItemDecision],
+        reviewer_comments: Optional[str] = None,
+    ) -> List[CapaAction]:
+        """Apply human QA review decisions (approval, rejection, owner/target date edits) in PostgreSQL."""
+        inv = investigation_repository.get_by_id(db, investigation_id)
+        if not inv:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Investigation '{investigation_id}' not found.",
+            )
+
+        existing_actions = capa_repository.list_by_investigation(db, inv.id)
+        updated_actions: List[CapaAction] = []
+
+        try:
+            for d in decisions:
+                target_action = None
+                try:
+                    cand_uuid = uuid.UUID(d.capa_id)
+                    target_action = next((a for a in existing_actions if a.id == cand_uuid), None)
+                except Exception:
+                    pass
+
+                if not target_action:
+                    for a in existing_actions:
+                        if d.edited_description and d.edited_description[:30].lower() in a.description.lower():
+                            target_action = a
+                            break
+                    if not target_action and existing_actions:
+                        if "01" in d.capa_id and len(existing_actions) >= 1:
+                            target_action = existing_actions[0]
+                        elif "02" in d.capa_id and len(existing_actions) >= 2:
+                            target_action = existing_actions[1]
+
+                if target_action:
+                    # Prevent changing status of closed/completed actions
+                    if target_action.action_status in (CAPAStatusEnum.COMPLETED, CAPAStatusEnum.CLOSED):
+                        if d.decision not in (CAPAStatusEnum.COMPLETED, CAPAStatusEnum.CLOSED):
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"Cannot alter status of closed CAPA action '{target_action.id}'.",
+                            )
+
+                    target_action.action_status = d.decision
+                    if d.edited_description:
+                        target_action.description = d.edited_description.strip()
+                    if d.edited_action_type:
+                        target_action.action_type = d.edited_action_type
+                    if d.assigned_owner:
+                        target_action.action_owner = d.assigned_owner.strip()
+                    if d.target_date:
+                        target_action.target_date = d.target_date
+                    if d.edited_effectiveness_plan:
+                        eff = d.edited_effectiveness_plan
+                        target_action.effectiveness_verification = (
+                            f"Method: {eff.verification_method} | "
+                            f"Target: {eff.measurable_outcome} | "
+                            f"Evidence: {eff.evidence_required} | "
+                            f"Verifier: {eff.suggested_verifier_role} | "
+                            f"Timeframe: {eff.verification_timeframe} | "
+                            f"Failure Criteria: {eff.failure_criteria}"
+                        )
+                    db.flush()
+                    updated_actions.append(target_action)
+
+            activity_repository.create(
+                db,
+                {
+                    "investigation_id": inv.id,
+                    "activity_type": "CAPA_REVIEW_DECISION",
+                    "description": f"Human review decision applied for {len(updated_actions)} CAPA actions.",
+                    "actor_identifier": decisions[0].reviewer_identifier if decisions else "QA Reviewer",
+                    "activity_metadata": {
+                        "reviewer_comments": reviewer_comments,
+                        "updated_count": len(updated_actions),
+                    },
+                },
+            )
+
+            db.commit()
+            for a in updated_actions:
+                db.refresh(a)
+            return updated_actions
+        except Exception:
+            db.rollback()
+            raise
+
+    def generate_capa(
+        self,
+        db: Session,
+        investigation_id: str,
+        problem_statement: Optional[str] = None,
+        persist: bool = True,
+    ) -> CAPAWorkflowResult:
+        """Execute AI-assisted CAPA recommendations workflow for an investigation."""
+        inv = investigation_repository.get_by_id(db, investigation_id)
+        if not inv:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Investigation '{investigation_id}' not found.",
+            )
+
+        from app.agents.graph import run_capa_generation_workflow
+
+        title = getattr(inv, "incident_title", getattr(inv, "title", "Deviation Excursion"))
+        desc = getattr(inv, "incident_description", getattr(inv, "description", ""))
+        equip = getattr(inv, "equipment", getattr(inv, "manufacturing_line", ""))
+
+        stmt = problem_statement or f"{title}: {desc[:150]}"
+        context = {
+            "title": title,
+            "description": desc,
+            "batch_number": inv.batch_number,
+            "equipment_id": equip,
+        }
+
+        # Check if existing RCA exists to pull potential root causes
+        from app.repositories.rca_repository import rca_repository
+        from app.schemas.rca import PotentialRootCause
+
+        rca_study = rca_repository.get_latest_by_investigation(db, inv.id)
+        causes: List[PotentialRootCause] = []
+        if rca_study and rca_study.five_whys:
+            terminal_why = next((w for w in rca_study.five_whys if w.is_root_cause), rca_study.five_whys[-1])
+            causes.append(
+                PotentialRootCause(
+                    cause_id="PRC-01",
+                    cause_description=terminal_why.answer,
+                    cause_category="Machine / Method",
+                    source_method="Five Whys",
+                    supporting_evidence=terminal_why.supporting_evidence_references or [],
+                    confidence=0.9,
+                    rationale="Designated from confirmed/draft terminal Why step.",
+                )
+            )
+
+        return run_capa_generation_workflow(
+            problem_statement=stmt,
+            incident_context=context,
+            potential_root_causes=causes,
+            investigation_id=str(inv.id),
+            persist=persist,
+            db=db,
+        )
 
 
 # Singleton service instance

@@ -11,6 +11,10 @@ from app.agents.nodes.fishbone_node import fishbone_node
 from app.agents.nodes.evidence_analysis_node import evidence_analysis_node
 from app.agents.nodes.synthesis_node import synthesis_node
 from app.agents.nodes.rca_finalization_node import rca_finalization_node
+from app.agents.nodes.capa_generation_node import capa_generation_node
+from app.agents.nodes.capa_validation_node import capa_validation_node
+from app.agents.nodes.capa_human_review_node import capa_human_review_node
+from app.agents.nodes.capa_finalization_node import capa_finalization_node
 
 __all__ = [
     "input_processing_node",
@@ -24,6 +28,10 @@ __all__ = [
     "evidence_analysis_node",
     "synthesis_node",
     "rca_finalization_node",
+    "capa_generation_node",
+    "capa_validation_node",
+    "capa_human_review_node",
+    "capa_finalization_node",
 ]
 
 

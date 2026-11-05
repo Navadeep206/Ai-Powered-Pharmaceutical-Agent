@@ -194,3 +194,4 @@ def fishbone_node(state: RCAWorkflowState) -> Dict[str, Any]:
         "fishbone_analysis": fishbone_result,
         "rca_warnings": rca_warnings,
     }
+

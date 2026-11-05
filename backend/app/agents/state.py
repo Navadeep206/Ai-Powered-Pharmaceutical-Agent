@@ -8,6 +8,7 @@ Maintains strict separation between operational workflow status and domain verif
 
 from typing import Any, Dict, List, Optional, TypedDict
 
+from app.schemas.capa import CAPARecommendation, CAPAWorkflowResult
 from app.schemas.extraction import (
     CriticalGapItem,
     ExtractionAnalysisResponse,
@@ -98,3 +99,34 @@ class RCAWorkflowState(ExtractionWorkflowState, total=False):
 
     # Final Synthesized RCA Result
     rca_workflow_result: Optional[RCAWorkflowResult]
+
+
+class CAPAWorkflowState(RCAWorkflowState, total=False):
+    """Extended LangGraph state for AI-assisted CAPA generation, validation, and human review."""
+
+    # CAPA Recommendation Containers
+    capa_recommendations: List[CAPARecommendation]
+    corrective_actions: List[CAPARecommendation]
+    preventive_actions: List[CAPARecommendation]
+    approved_actions: List[CAPARecommendation]
+    rejected_actions: List[CAPARecommendation]
+    pending_actions: List[CAPARecommendation]
+
+    # Validation & Quality Auditing
+    capa_validation_errors: List[str]
+    capa_warnings: List[str]
+
+    # Lifecycle & Review State
+    capa_generation_status: str  # PENDING, IN_PROGRESS, COMPLETED, FAILED
+    capa_review_status: str  # PENDING_REVIEW, APPROVED, REJECTED, PARTIAL
+    human_review_required: bool  # Strict GxP verification gate (always True until human review complete)
+    review_decisions: List[Dict[str, Any]]
+    reviewer_comments: Optional[str]
+    workflow_completion_status: str  # PAUSED_FOR_HUMAN_REVIEW, COMPLETED, FAILED
+
+    # Persistence Tracking
+    persisted_capa_ids: List[str]
+
+    # Final Synthesized CAPA Result
+    capa_workflow_result: Optional[CAPAWorkflowResult]
+

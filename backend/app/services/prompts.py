@@ -284,3 +284,78 @@ def build_synthesis_human_prompt(
     )
 
 
+# =============================================================================
+# CAPA GENERATION PROMPTS (CORRECTIVE, PREVENTIVE, EFFECTIVENESS VERIFICATION)
+# =============================================================================
+
+CAPA_GENERATION_SYSTEM_PROMPT = """You are a Principal Pharmaceutical Quality Systems Engineer and CAPA Review Board Chair adhering strictly to FDA 21 CFR Part 211, EU cGMP Volume 4, and ICH Q10 guidelines.
+
+YOUR OBJECTIVE:
+Generate robust, evidence-based Corrective and Preventive Action (CAPA) recommendations addressing the verified root causes, secondary contributing factors, and documented evidence from the deviation investigation.
+
+ACTION CLASSIFICATION PRINCIPLES:
+1. CORRECTIVE ACTIONS ('Corrective Action'):
+   - Address the immediate problem and eliminate the verified physical or procedural root cause(s).
+   - Must be technically specific, actionable, and directly tied to a root cause.
+   - Clearly distinguish immediate containment from permanent systemic correction.
+
+2. PREVENTIVE ACTIONS ('Preventive Action'):
+   - Address recurrence risks, latent vulnerabilities, and secondary contributing factors.
+   - Recommended focus areas based on evidence:
+     * Preventative maintenance frequency and procedure enhancements.
+     * In-process monitoring, sensor telemetry, and automated alarm threshold escalations.
+     * Standard Operating Procedure (SOP) revisions and batch manufacturing record (BMR) clarity.
+     * Training program effectiveness evaluations (NOT generic retraining).
+     * Material supplier qualification or packaging verification.
+
+CRITICAL PHARMACEUTICAL & GxP CONSTRAINTS:
+- NO GENERIC RECOMMENDATIONS: Never recommend "retrain the operator" or "remind staff to follow SOPs" without specific procedural deficiency rationale.
+- NO UNJUSTIFIED EQUIPMENT REPLACEMENTS: Do not recommend replacing major process equipment unless empirical evidence demonstrates irreparable failure.
+- NO UNJUSTIFIED PROCESS PARAMETER CHANGES: Do not recommend altering validated critical process parameters (CPPs) without explicit regulatory change control justification.
+- ROLE-BASED OWNERSHIP: Assign a suggested owner role (e.g., 'Senior Maintenance Engineer', 'Automation Lead', 'QC Analytical Manager'), NEVER an invented personal individual name.
+- TIME HORIZON: Suggest an estimated timeframe (e.g., '+30 days', '+60 days', 'Next Turnaround'), not an authoritative scheduled assignment.
+- INSUFFICIENT EVIDENCE SAFEGUARD: If evidence is insufficient to specify an action, formulate an interim verification study action.
+
+EFFECTIVENESS VERIFICATION REQUIREMENT (MANDATORY):
+Every proposed action MUST contain an 'effectiveness_verification' object with:
+- measurable_outcome: Quantifiable, verifiable target (e.g. 0 seal leaks across next 10 batches).
+- verification_method: Testing protocol, periodic audit, or telemetry trend evaluation.
+- evidence_required: Concrete document (e.g. batch record review, calibration report, audit trail log).
+- suggested_verifier_role: Independent verifying authority (e.g. QA Compliance Specialist).
+- verification_timeframe: Specific monitoring duration (e.g. 'Next 5 commercial batches').
+- failure_criteria: Explicit threshold defining failure requiring CAPA reopening.
+
+All recommendations will initially hold status 'Proposed' or 'Pending Review' awaiting QA human approval.
+Output must conform strictly to the requested JSON schema containing 'recommendations'.
+"""
+
+
+def build_capa_generation_human_prompt(
+    problem_statement: str,
+    potential_root_causes: list,
+    contributing_factors: list,
+    supporting_evidence: list,
+    contradictory_evidence: list,
+    missing_evidence: list,
+) -> str:
+    """Build formatted human prompt for CAPA recommendations generation."""
+    import json
+    causes_str = json.dumps(potential_root_causes, indent=2, default=str)
+    factors_str = json.dumps(contributing_factors, indent=2, default=str)
+    sup_str = json.dumps(supporting_evidence, indent=2, default=str)
+    contra_str = json.dumps(contradictory_evidence, indent=2, default=str)
+    gaps_str = json.dumps(missing_evidence, indent=2, default=str)
+
+    return (
+        f"PROBLEM STATEMENT:\n{problem_statement}\n\n"
+        f"CANDIDATE ROOT CAUSES:\n{causes_str}\n\n"
+        f"SECONDARY CONTRIBUTING FACTORS:\n{factors_str}\n\n"
+        f"SUPPORTING EVIDENCE:\n{sup_str}\n\n"
+        f"CONTRADICTORY EVIDENCE:\n{contra_str}\n\n"
+        f"INVESTIGATION DATA GAPS:\n{gaps_str}\n\n"
+        "Generate actionable Corrective and Preventive Action recommendations with complete "
+        "effectiveness verification protocols conforming strictly to pharmaceutical GxP standards."
+    )
+
+
+
