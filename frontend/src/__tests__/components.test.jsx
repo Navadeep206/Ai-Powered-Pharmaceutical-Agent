@@ -715,6 +715,134 @@ describe('Frontend Component Integration Tests', () => {
         expect(screen.getByText('Validation Lead')).toBeDefined();
       });
     });
+
+    it('renders valid linked investigation IDs as links and navigates from multiple records', async () => {
+      const mockCapas = [
+        {
+          action_id: 'CAPA-001',
+          description: 'Recalibrate temperature transmitter TT-401',
+          action_type: 'Corrective Action',
+          investigation_id: 'INV-2026-7277',
+          action_owner: 'Lead Instrumentation Engineer',
+          target_date: '2026-11-15',
+          status: 'Approved',
+          effectiveness_verification_method: 'Verify 3-batch calibration drift under 0.1C',
+        },
+        {
+          action_id: 'CAPA-002',
+          description: 'Update centrifuge CIP spray nozzle SOP',
+          action_type: 'Preventive Action',
+          investigation_id: 'INV-2026-9005',
+          action_owner: 'Quality Assurance Specialist',
+          target_date: '2026-12-01',
+          status: 'In Progress',
+          effectiveness_verification_method: 'Review riboflavin coverage test records',
+        },
+        {
+          action_id: 'CAPA-003',
+          description: 'Orphaned action item without linked investigation',
+          action_type: 'Corrective Action',
+          investigation_id: null,
+          action_owner: 'Operations Lead',
+          target_date: '2026-11-30',
+          status: 'Draft',
+          effectiveness_verification_method: 'Visual inspection',
+        },
+      ];
+
+      vi.spyOn(capaService, 'listAllCAPA').mockResolvedValue(mockCapas);
+
+      render(
+        <MemoryRouter>
+          <CAPAManagementPage />
+        </MemoryRouter>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('INV-2026-7277')).toBeDefined();
+        expect(screen.getByText('INV-2026-9005')).toBeDefined();
+      });
+
+      // 1. Verify first record link destination matches clicked ID
+      const link1 = screen.getByText('INV-2026-7277').closest('a');
+      expect(link1).not.toBeNull();
+      expect(link1.getAttribute('href')).toBe('/investigations/INV-2026-7277');
+
+      // 2. Verify second record link destination matches clicked ID
+      const link2 = screen.getByText('INV-2026-9005').closest('a');
+      expect(link2).not.toBeNull();
+      expect(link2.getAttribute('href')).toBe('/investigations/INV-2026-9005');
+
+      // 3. Verify orphaned record renders N/A gracefully without broken link
+      const naElements = screen.getAllByText('N/A');
+      expect(naElements.length).toBeGreaterThan(0);
+      const naLink = naElements.find((el) => el.closest('a'));
+      expect(naLink).toBeUndefined();
+    });
+
+    it('navigates to investigation workspace when linked ID is clicked', async () => {
+      const mockCapas = [
+        {
+          action_id: 'CAPA-001',
+          description: 'Recalibrate temperature transmitter TT-401',
+          action_type: 'Corrective Action',
+          investigation_id: 'INV-2026-7277',
+          action_owner: 'Lead Instrumentation Engineer',
+          target_date: '2026-11-15',
+          status: 'Approved',
+          effectiveness_verification_method: 'Verify 3-batch calibration drift under 0.1C',
+        },
+      ];
+
+      const mockInvestigation = {
+        investigation_id: 'INV-2026-7277',
+        incident_title: 'Live Validation Excursion: Crystallizer CR-101 Temperature Drift',
+        batch_number: 'BATCH-CR-9901',
+        severity: 'Critical',
+        investigation_status: 'Under Investigation',
+        department: 'API Synthesis',
+        product_name: 'Atorvastatin Calcium API',
+        equipment: 'CR-101',
+        incident_description: 'Temperature peaked at 22.4C',
+        immediate_action_taken: 'Manual bypass valve',
+        date: '2026-11-05',
+      };
+
+      vi.spyOn(capaService, 'listAllCAPA').mockResolvedValue(mockCapas);
+      vi.spyOn(investigationService, 'getInvestigation').mockResolvedValue(mockInvestigation);
+      vi.spyOn(investigationService, 'listDocuments').mockResolvedValue([]);
+      vi.spyOn(rcaService, 'getRCA').mockResolvedValue({ five_whys: [], fishbone_causes: [] });
+      vi.spyOn(evidenceService, 'listEvidence').mockResolvedValue([]);
+      vi.spyOn(capaService, 'listCAPA').mockResolvedValue(mockCapas);
+
+      const store = createMockStore();
+
+      render(
+        <Provider store={store}>
+          <MemoryRouter initialEntries={['/capa']}>
+            <Routes>
+              <Route path="/capa" element={<CAPAManagementPage />} />
+              <Route path="/investigations/:id" element={<InvestigationDetailPage />} />
+            </Routes>
+          </MemoryRouter>
+        </Provider>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('INV-2026-7277')).toBeDefined();
+      });
+
+      const link = screen.getByText('INV-2026-7277').closest('a');
+      expect(link).toBeDefined();
+
+      fireEvent.click(link);
+
+      await waitFor(() => {
+        expect(
+          screen.getByText('Live Validation Excursion: Crystallizer CR-101 Temperature Drift')
+        ).toBeDefined();
+      });
+    });
   });
 
   describe('Sidebar Dynamic Badge Component', () => {

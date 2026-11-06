@@ -248,7 +248,16 @@ export default function CAPAManagementPage() {
               const statusVariant = STATUS_VARIANTS[capa.status] || 'neutral';
               const rawId = capa.action_id || capa.id || 'CAPA-N/A';
               const capaDisplayId = rawId.length > 18 ? `CAPA-${rawId.slice(0, 8).toUpperCase()}` : rawId;
-              const invRef = capa.investigation_number || capa.investigation_id || capa.investigationId || 'N/A';
+              const rawInvId = capa.investigation_id || capa.investigation_number || capa.investigationId;
+              const hasValidInv = Boolean(
+                rawInvId &&
+                typeof rawInvId === 'string' &&
+                rawInvId.trim() !== '' &&
+                rawInvId.trim().toUpperCase() !== 'N/A' &&
+                rawInvId.trim().toLowerCase() !== 'null' &&
+                rawInvId.trim().toLowerCase() !== 'undefined'
+              );
+              const linkedInvestigationId = hasValidInv ? rawInvId.trim() : null;
 
               return (
                 <TableRow key={rawId}>
@@ -282,14 +291,20 @@ export default function CAPAManagementPage() {
                     </span>
                   </TableCell>
                   <TableCell className="whitespace-nowrap">
-                    <Link
-                      to={`/investigations/${encodeURIComponent(invRef)}?tab=capa`}
-                      className="font-mono text-xs text-[#0F9D91] hover:underline font-semibold flex items-center space-x-1"
-                      title="Open investigation CAPA tab"
-                    >
-                      <span>{invRef}</span>
-                      <ExternalLink className="w-3 h-3 text-[#0F9D91]" />
-                    </Link>
+                    {linkedInvestigationId ? (
+                      <Link
+                        to={`/investigations/${encodeURIComponent(linkedInvestigationId)}`}
+                        className="font-mono text-xs text-[#0F9D91] hover:underline font-semibold flex items-center space-x-1"
+                        title={`Navigate to Investigation Workspace (${linkedInvestigationId})`}
+                      >
+                        <span>{linkedInvestigationId}</span>
+                        <ExternalLink className="w-3 h-3 text-[#0F9D91]" />
+                      </Link>
+                    ) : (
+                      <span className="font-mono text-xs text-[#94A3B8]" title="No linked investigation">
+                        N/A
+                      </span>
+                    )}
                   </TableCell>
                   <TableCell className="whitespace-nowrap">
                     <div className="flex items-center text-xs text-[#475569]">
