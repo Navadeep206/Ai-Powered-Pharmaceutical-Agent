@@ -23,8 +23,9 @@ import {
   addEvidenceItem,
   updateEvidenceStatus,
   updateCAPA,
+  setActiveInvestigationId,
+  invalidateInvestigation,
 } from '../../redux/slices/investigationSlice';
-import { fetchDashboardSummary, fetchDashboardActivities } from '../../redux/slices/dashboardSlice';
 import investigationService from '../../services/investigationService';
 import InvestigationHeader from '../../components/investigation/InvestigationHeader';
 import InvestigationTabs from '../../components/investigation/InvestigationTabs';
@@ -97,6 +98,7 @@ export default function InvestigationDetailPage() {
 
   const loadData = useCallback(() => {
     if (id) {
+      dispatch(setActiveInvestigationId(id));
       dispatch(fetchInvestigationById(id));
       dispatch(fetchInvestigationRCA(id));
       dispatch(fetchInvestigationEvidence(id));
@@ -107,7 +109,10 @@ export default function InvestigationDetailPage() {
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+    return () => {
+      dispatch(setActiveInvestigationId(null));
+    };
+  }, [loadData, dispatch]);
 
   useEffect(() => {
     if (currentInvestigation) {
@@ -184,8 +189,6 @@ export default function InvestigationDetailPage() {
           },
         })
       );
-      dispatch(fetchDashboardSummary());
-      dispatch(fetchDashboardActivities());
       setOverviewSavedToast(true);
       setTimeout(() => setOverviewSavedToast(false), 3000);
     } catch (err) {
@@ -210,8 +213,6 @@ export default function InvestigationDetailPage() {
           summary: summaryToSave,
         })
       ).unwrap();
-      dispatch(fetchDashboardSummary());
-      dispatch(fetchDashboardActivities());
     } catch (err) {
       console.error('Failed to save RCA findings in database:', err);
     }
@@ -236,8 +237,6 @@ export default function InvestigationDetailPage() {
           },
         })
       ).unwrap();
-      dispatch(fetchDashboardSummary());
-      dispatch(fetchDashboardActivities());
     } catch (err) {
       console.error('Failed to execute AI RCA reasoning:', err);
     }
@@ -253,8 +252,6 @@ export default function InvestigationDetailPage() {
           item,
         })
       ).unwrap();
-      dispatch(fetchDashboardSummary());
-      dispatch(fetchDashboardActivities());
     } catch (err) {
       console.error('Failed to persist evidence record:', err);
     }
@@ -270,8 +267,6 @@ export default function InvestigationDetailPage() {
           status,
         })
       ).unwrap();
-      dispatch(fetchDashboardSummary());
-      dispatch(fetchDashboardActivities());
     } catch (err) {
       console.error('Failed to persist updated evidence status:', err);
     }
@@ -287,8 +282,6 @@ export default function InvestigationDetailPage() {
           problemStatement: overviewForm.title || currentInvestigation?.title,
         })
       ).unwrap();
-      dispatch(fetchDashboardSummary());
-      dispatch(fetchDashboardActivities());
     } catch (err) {
       console.error('Failed to generate AI CAPA actions:', err);
     }
@@ -303,8 +296,6 @@ export default function InvestigationDetailPage() {
           actionData,
         })
       ).unwrap();
-      dispatch(fetchDashboardSummary());
-      dispatch(fetchDashboardActivities());
     } catch (err) {
       console.error('Failed to propose CAPA action:', err);
     }
@@ -331,7 +322,6 @@ export default function InvestigationDetailPage() {
             generalComments: editData.notes || 'Human QA review applied in workspace',
           })
         ).unwrap();
-        dispatch(fetchInvestigationCAPA(id));
       } else {
         await dispatch(
           updateCAPAStatusAsync({
@@ -341,8 +331,6 @@ export default function InvestigationDetailPage() {
           })
         ).unwrap();
       }
-      dispatch(fetchDashboardSummary());
-      dispatch(fetchDashboardActivities());
     } catch (err) {
       console.error('Failed to update CAPA status:', err);
     }
@@ -354,8 +342,8 @@ export default function InvestigationDetailPage() {
     }
   };
 
-  // 1. Loading State
-  if (detailLoading) {
+  // 1. Loading State: Only block the full screen when we have NO cached record to show (SWR)
+  if (detailLoading && !currentInvestigation) {
     return (
       <div className="py-24 flex flex-col items-center justify-center space-y-3">
         <LoadingSpinner size="lg" />

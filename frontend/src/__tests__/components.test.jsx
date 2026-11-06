@@ -29,6 +29,7 @@ import Sidebar from '../components/layout/Sidebar';
 import StatusDistribution from '../components/dashboard/StatusDistribution';
 import RecentInvestigations from '../components/dashboard/RecentInvestigations';
 import RecentActivity from '../components/dashboard/RecentActivity';
+import { normalizeExtractionResponse } from '../utils/normalizers';
 
 function createMockStore(preloadedState = {}) {
   return configureStore({
@@ -483,6 +484,405 @@ describe('Frontend Component Integration Tests', () => {
         expect(documentService.extractDocument).toHaveBeenCalledTimes(1);
         expect(screen.getByText('Verify Extracted Deviation Record')).toBeDefined();
       });
+    });
+
+    it('NewInvestigationPage keeps intake page visible during analyzing state and renders 4-step progress stepper', () => {
+      const store = createMockStore({
+        investigations: {
+          draftIntake: {
+            method: 'upload',
+            fileInfo: {
+              name: 'Incident_Report_BMR.pdf',
+              size: '1.2 MB',
+              rawBytes: 1258291,
+              type: 'application/pdf',
+              lastModified: '11/04/2026',
+            },
+            rawText: '',
+            emailSubject: '',
+            emailBody: '',
+            extractionState: 'analyzing',
+            analysisProgress: 'extracting',
+            extractionError: null,
+            extractedData: null,
+          },
+        },
+      });
+
+      render(
+        <Provider store={store}>
+          <MemoryRouter initialEntries={['/investigations/new']}>
+            <Routes>
+              <Route path="/investigations/new" element={<NewInvestigationPage />} />
+            </Routes>
+          </MemoryRouter>
+        </Provider>
+      );
+
+      // Intake page and uploaded file card must stay visible!
+      expect(screen.getByText('Incident_Report_BMR.pdf')).toBeDefined();
+      expect(screen.getByText(/Analyzing Quality Incident Intake/i)).toBeDefined();
+
+      // 4-Step progress stepper states must be present
+      expect(screen.getByText(/1\. Uploading/i)).toBeDefined();
+      expect(screen.getByText(/2\. Extracting document/i)).toBeDefined();
+      expect(screen.getByText(/3\. AI analysis/i)).toBeDefined();
+      expect(screen.getByText(/4\. Results ready/i)).toBeDefined();
+
+      // Analyze Incident button must be disabled with spinner during analysis
+      const analyzeButton = screen.getByRole('button', { name: /analyzing incident\.\.\./i });
+      expect(analyzeButton.disabled).toBe(true);
+    });
+
+    it('NewInvestigationPage renders clear readable error notice on extraction failure without crashing or blanking, preserving uploaded file', () => {
+      const store = createMockStore({
+        investigations: {
+          draftIntake: {
+            method: 'upload',
+            fileInfo: {
+              name: 'RootIQ_Sample_Pharmaceutical_Incident_Report.pdf',
+              size: '254 KB',
+              rawBytes: 260000,
+              type: 'application/pdf',
+              lastModified: '11/04/2026',
+            },
+            rawText: '',
+            emailSubject: '',
+            emailBody: '',
+            extractionState: 'failed',
+            analysisProgress: 'failed',
+            extractionError: 'The request timed out while communicating with the RootIQ backend server. Please try again.',
+            extractedData: null,
+          },
+        },
+      });
+
+      render(
+        <Provider store={store}>
+          <MemoryRouter initialEntries={['/investigations/new']}>
+            <Routes>
+              <Route path="/investigations/new" element={<NewInvestigationPage />} />
+            </Routes>
+          </MemoryRouter>
+        </Provider>
+      );
+
+      // The page must NOT be blank
+      expect(screen.getByText(/AI Extraction Notice/i)).toBeDefined();
+      expect(screen.getByText(/The request timed out while communicating with the RootIQ backend server/i)).toBeDefined();
+
+      // Uploaded file info is still preserved on error
+      expect(screen.getByText('RootIQ_Sample_Pharmaceutical_Incident_Report.pdf')).toBeDefined();
+
+      // Action buttons: Retry Analysis & Proceed with Manual Entry (verifying ArrowRight renders properly)
+      expect(screen.getByRole('button', { name: /retry analysis/i })).toBeDefined();
+      expect(screen.getByRole('button', { name: /proceed with manual entry/i })).toBeDefined();
+    });
+
+    it('ExtractionReviewForm renders Citation unverified badge, caps confidence, and allows editing detection_method', () => {
+      const handleUpdate = vi.fn();
+      const mockExtractedData = {
+        completenessScore: 85,
+        overallConfidence: 0.88,
+        extractionStatus: 'NEEDS_REVIEW',
+        disclaimer: 'GxP verification notice',
+        incidentInfo: {
+          deviationId: 'DEV-2026-0891',
+          batchNumber: 'BATCH-API-26-041',
+          severity: 'Medium',
+          incidentTitle: 'High Temperature Excursion in FBD-204',
+          productName: 'Paracetamol High-Density Granules',
+          department: 'Solid Oral Dosage',
+          equipment: 'Fluid Bed Dryer FBD-204',
+          incidentDate: '2026-11-04',
+          detectionDate: '2026-11-04',
+          incidentDescription: 'Temperature recorded at 56.8 C for 22 minutes.',
+          immediateActionTaken: 'Operator paused drying cycle at 10:38',
+        },
+        context: {
+          expectedCondition: '48-52 C',
+          actualCondition: 'Peak 56.8 C',
+          observedImpact: '',
+          affectedProcess: 'Final drying',
+          initialObservations: 'Alarm acknowledged at 10:17',
+        },
+        additionalContext: {
+          detectionMethod: 'High-temperature alarm acknowledged by operator',
+        },
+        fieldMeta: {
+          detection_method: {
+            field_name: 'detection_method',
+            value: 'High-temperature alarm acknowledged by operator',
+            confidence_score: 0.95,
+            extraction_status: 'EXTRACTED',
+            source_reference: {
+              source_type: 'Document',
+              page_number: 1,
+              excerpt: 'operator noticed the high-temperature alarm',
+              char_offset_start: 896,
+              char_offset_end: 939,
+              is_traceable: true,
+            },
+            validation_warnings: [],
+          },
+          immediate_action_taken: {
+            field_name: 'immediate_action_taken',
+            value: 'Operator paused drying cycle at 10:38',
+            confidence_score: 0.70,
+            extraction_status: 'EXTRACTED',
+            source_reference: {
+              source_type: 'Document',
+              page_number: 1,
+              excerpt: 'operator paused the drying cycle ... entered a quality-hold instruction',
+              char_offset_start: null,
+              char_offset_end: null,
+              is_traceable: false,
+            },
+            validation_warnings: [
+              "Citation unverified — investigator review required: excerpt for 'immediate_action_taken' could not be matched at reported character offsets.",
+            ],
+          },
+        },
+        criticalGaps: [],
+        possibleContradictions: [],
+        investigatorQuestions: [],
+      };
+
+      render(
+        <ExtractionReviewForm
+          extractedData={mockExtractedData}
+          onUpdateField={handleUpdate}
+        />
+      );
+
+      // Verify unverified citation badge is rendered on immediate_action_taken
+      expect(screen.getAllByText(/Citation unverified — investigator review required/i).length).toBeGreaterThan(0);
+
+      // Verify verified citation badge is rendered on detection_method
+      expect(screen.getByText(/Citation Verified/i)).toBeDefined();
+
+      // Verify detection_method is rendered and editable by investigator
+      const detectionInput = screen.getByDisplayValue('High-temperature alarm acknowledged by operator');
+      expect(detectionInput).toBeDefined();
+      fireEvent.change(detectionInput, { target: { value: 'SCADA High-Temp Alarm (FBD-204)' } });
+      expect(handleUpdate).toHaveBeenCalledWith(
+        'additionalContext',
+        'detectionMethod',
+        'SCADA High-Temp Alarm (FBD-204)',
+        'detection_method'
+      );
+    });
+
+    it('ExtractionReviewForm enforces unselected severity, AI Generated Summary title badge, and inferred detection date', () => {
+      const mockExtractedData = {
+        completenessScore: 88,
+        overallConfidence: 0.92,
+        extractionStatus: 'NEEDS_REVIEW',
+        incidentInfo: {
+          deviationId: '',
+          batchNumber: 'BATCH-API-26-041',
+          incidentTitle: 'Product Temperature Excursion During Final Drying',
+          incidentDescription: 'During final drying in FBD-204, product temperature reached 56.8°C.',
+          productName: 'Paracetamol High-Density Granules',
+          department: 'Solid Oral Dosage',
+          equipment: 'Fluid Bed Dryer FBD-204',
+          incidentDate: '2026-11-04',
+          detectionDate: '2026-11-04',
+          severity: '', // Left unselected per user specification
+          immediateActionTaken:
+            'Operator paused drying cycle at approximately 10:38 and notified shift supervisor; production supervisor entered quality-hold instruction for batch in batch record at 10:52; material remains segregated in designated hold area.',
+        },
+        context: {
+          expectedCondition: '48–52 °C',
+          actualCondition: 'Peak 56.8 °C',
+          observedImpact: '',
+          affectedProcess: 'Final drying',
+          initialObservations: 'Equipment historian export contains temperature trend.',
+        },
+        additionalContext: {
+          detectionMethod: 'High-temperature alarm',
+        },
+        fieldMeta: {
+          severity: {
+            field_name: 'severity',
+            value: '',
+            extraction_status: 'MISSING',
+            validation_warnings: [
+              'Deviation severity not specified in source document — formal investigator assessment required.',
+            ],
+          },
+          incident_title: {
+            field_name: 'incident_title',
+            value: 'Product Temperature Excursion During Final Drying',
+            extraction_status: 'INFERRED',
+            validation_warnings: [
+              'AI-generated summary title synthesized from incident description — not explicitly titled in source document.',
+            ],
+          },
+          detection_date: {
+            field_name: 'detection_date',
+            value: '2026-11-04',
+            extraction_status: 'INFERRED',
+            source_reference: {
+              source_type: 'Document',
+              page_number: 1,
+              excerpt: 'alarm was acknowledged at 10:17',
+              is_traceable: true,
+            },
+            validation_warnings: [
+              'Inferred from documented alarm timeline (alarm acknowledged at 10:17 on 04-Nov-2026) — not explicitly designated as a formal detection date field in source document.',
+            ],
+          },
+          immediate_action_taken: {
+            field_name: 'immediate_action_taken',
+            value:
+              'Operator paused drying cycle at approximately 10:38 and notified shift supervisor; production supervisor entered quality-hold instruction for batch in batch record at 10:52; material remains segregated in designated hold area.',
+            confidence_score: 1.0,
+            extraction_status: 'EXTRACTED',
+            source_reference: {
+              source_type: 'Document',
+              page_number: 1,
+              excerpt:
+                'At approximately 10:38 on 04-Nov-2026, the operator paused the drying cycle and notified the shift supervisor. At 10:52, the production supervisor entered a quality-hold instruction for the batch in the batch record. The material remains segregated in the designated hold area as of the time this notification was prepared.',
+              is_traceable: true,
+            },
+            validation_warnings: [],
+          },
+        },
+        criticalGaps: [],
+        possibleContradictions: [],
+        investigatorQuestions: [],
+      };
+
+      render(
+        <ExtractionReviewForm
+          extractedData={mockExtractedData}
+          onUpdateField={vi.fn()}
+        />
+      );
+
+      // 1. Verify severity is unselected and marked as Missing with warning
+      expect(screen.getByText(/Deviation severity not specified in source document — formal investigator assessment required/i)).toBeDefined();
+      const selectElement = screen.getByRole('combobox');
+      expect(selectElement.value).toBe('');
+
+      // 2. Verify AI Generated Summary badge is rendered on incident_title
+      expect(screen.getByText(/AI Generated Summary/i)).toBeDefined();
+      expect(screen.getByDisplayValue('Product Temperature Excursion During Final Drying')).toBeDefined();
+
+      // 3. Verify Inferred badge and alarm timeline warning are rendered on detection_date
+      expect(screen.getByText(/Inferred from documented alarm timeline/i)).toBeDefined();
+
+      // 4. Verify comprehensive 4-part containment immediate action is present
+      expect(screen.getByDisplayValue(/Operator paused drying cycle at approximately 10:38/i)).toBeDefined();
+      expect(screen.getByDisplayValue(/quality-hold instruction for batch in batch record at 10:52/i)).toBeDefined();
+      expect(screen.getByDisplayValue(/material remains segregated in designated hold area/i)).toBeDefined();
+    });
+
+    it('correctly maps and renders excursion condition, containment action, and impact from backend response', () => {
+      const backendResponse = {
+        analysis_id: 'ANALYSIS-EXCURSION-01',
+        extraction_status: 'PARTIALLY_COMPLETED',
+        completeness_score: 72,
+        overall_confidence: 0.96,
+        missing_fields: ['deviation_id', 'product_name', 'incident_date'],
+        critical_gaps: ['Critical GxP Gap: Incident occurrence date is missing.'],
+        extracted_data: {
+          incident_title: {
+            field_name: 'incident_title',
+            value: 'Temperature excursion in reactor R-101',
+            confidence_score: 0.95,
+            extraction_status: 'EXTRACTED',
+          },
+          incident_description: {
+            field_name: 'incident_description',
+            value: 'Reaction mass reached 74°C for 18 minutes during crystallization.',
+            confidence_score: 0.98,
+            extraction_status: 'EXTRACTED',
+          },
+          batch_number: {
+            field_name: 'batch_number',
+            value: 'BATCH-CR-9901',
+            confidence_score: 1.0,
+            extraction_status: 'EXTRACTED',
+          },
+          equipment_id: {
+            field_name: 'equipment_id',
+            value: 'R-101',
+            confidence_score: 1.0,
+            extraction_status: 'EXTRACTED',
+          },
+          expected_condition: {
+            field_name: 'expected_condition',
+            value: '65-70°C',
+            confidence_score: 1.0,
+            extraction_status: 'EXTRACTED',
+          },
+          actual_condition: {
+            field_name: 'actual_condition',
+            value: '74°C for approximately 18 minutes',
+            confidence_score: 1.0,
+            extraction_status: 'EXTRACTED',
+          },
+          immediate_action_taken: {
+            field_name: 'immediate_action_taken',
+            value: 'Batch placed on hold pending quality unit review',
+            confidence_score: 1.0,
+            extraction_status: 'EXTRACTED',
+          },
+          potential_impact: {
+            field_name: 'potential_impact',
+            value: 'Product quality impact is currently under investigation',
+            confidence_score: 0.90,
+            extraction_status: 'EXTRACTED',
+          },
+          observations: {
+            field_name: 'observations',
+            value: 'Visual discoloration of the reaction mass',
+            confidence_score: 1.0,
+            extraction_status: 'EXTRACTED',
+          },
+          incident_date: {
+            field_name: 'incident_date',
+            value: null,
+            confidence_score: 0.0,
+            extraction_status: 'MISSING',
+          },
+        },
+      };
+
+      const normalized = normalizeExtractionResponse(backendResponse);
+
+      // Verify mapping
+      expect(normalized.incidentInfo.incidentDescription).toBe('Reaction mass reached 74°C for 18 minutes during crystallization.');
+      expect(normalized.incidentInfo.immediateActionTaken).toBe('Batch placed on hold pending quality unit review');
+      expect(normalized.context.expectedCondition).toBe('65-70°C');
+      expect(normalized.context.actualCondition).toBe('74°C for approximately 18 minutes');
+      expect(normalized.context.observedImpact).toBe('Product quality impact is currently under investigation');
+      expect(normalized.context.initialObservations).toBe('Visual discoloration of the reaction mass');
+      expect(normalized.fieldMeta.incident_date.value).toBeNull();
+      expect(normalized.fieldMeta.incident_date.confidence_score).toBe(0.0);
+
+      render(
+        <ExtractionReviewForm
+          extractedData={normalized}
+          onUpdateField={vi.fn()}
+          onRevertField={vi.fn()}
+          onSaveDraft={vi.fn()}
+          onContinueToRCA={vi.fn()}
+          isDraftSaved={false}
+          isSubmitting={false}
+        />
+      );
+
+      // Verify rendered values in the form
+      expect(screen.getByDisplayValue('BATCH-CR-9901')).toBeDefined();
+      expect(screen.getByDisplayValue('R-101')).toBeDefined();
+      expect(screen.getByDisplayValue('65-70°C')).toBeDefined();
+      expect(screen.getByDisplayValue('74°C for approximately 18 minutes')).toBeDefined();
+      expect(screen.getByDisplayValue('Batch placed on hold pending quality unit review')).toBeDefined();
+      expect(screen.getByDisplayValue('Product quality impact is currently under investigation')).toBeDefined();
+      expect(screen.getByDisplayValue('Visual discoloration of the reaction mass')).toBeDefined();
     });
   });
 

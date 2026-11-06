@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 import groq
 from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import AliasChoices, BaseModel, Field, ValidationError
 
 from app.agents.state import RCAWorkflowState
 from app.core.exceptions import (
@@ -39,11 +39,25 @@ class EvidenceItemModel(BaseModel):
     """Transfer model for single evidence assessment in LLM response."""
 
     evidence_id: Optional[str] = None
-    evidence_description: str
-    evidence_type: EvidenceTypeEnum
-    source_reference: Optional[str] = None
-    related_potential_cause: Optional[str] = None
-    reasoning: Optional[str] = None
+    evidence_description: str = Field(
+        validation_alias=AliasChoices("evidence_description", "description", "statement")
+    )
+    evidence_type: EvidenceTypeEnum = Field(
+        default=EvidenceTypeEnum.SUPPORTING,
+        validation_alias=AliasChoices("evidence_type", "type", "category", "classification"),
+    )
+    source_reference: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("source_reference", "source", "reference"),
+    )
+    related_potential_cause: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("related_potential_cause", "related_cause", "related_cause_or_why"),
+    )
+    reasoning: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("reasoning", "rationale", "notes"),
+    )
     confidence: float = Field(default=0.85, ge=0.0, le=1.0)
 
 

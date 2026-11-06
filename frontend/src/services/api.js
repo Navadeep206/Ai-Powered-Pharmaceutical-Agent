@@ -92,10 +92,14 @@ export const api = axios.create({
   },
 });
 
-// Request interceptor: attach audit timestamps without injecting unauthenticated bearer tokens
+// Request interceptor: attach audit timestamps and handle FormData multipart headers properly
 api.interceptors.request.use(
   (config) => {
     config.headers['X-Client-Timestamp'] = new Date().toISOString();
+    // Allow browser / Axios to automatically set multipart/form-data with dynamic boundary
+    if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+      delete config.headers['Content-Type'];
+    }
     return config;
   },
   (error) => Promise.reject(normalizeApiError(error))

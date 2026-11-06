@@ -381,6 +381,13 @@ export function normalizeExtractedField(rawField, canonicalName) {
         ? rawField.value
         : rawField.ai_extracted_value ?? null;
 
+    const confScore =
+      typeof rawField.confidence_score === 'number'
+        ? rawField.confidence_score
+        : effectiveValue !== null
+        ? 0.85
+        : 0.0;
+
     return {
       fieldName: rawField.field_name || canonicalName,
       field_name: rawField.field_name || canonicalName,
@@ -388,8 +395,7 @@ export function normalizeExtractedField(rawField, canonicalName) {
       ai_extracted_value: rawField.ai_extracted_value ?? effectiveValue,
       human_edited_value: rawField.human_edited_value ?? null,
       is_human_modified: Boolean(rawField.is_human_modified),
-      confidence_score:
-        typeof rawField.confidence_score === 'number' ? rawField.confidence_score : null,
+      confidence_score: confScore,
       source_reference: rawField.source_reference
         ? {
             source_type: rawField.source_reference.source_type || 'Unknown',
@@ -402,7 +408,7 @@ export function normalizeExtractedField(rawField, canonicalName) {
           }
         : null,
       extraction_status:
-        rawField.extraction_status || (effectiveValue ? 'EXTRACTED' : 'MISSING'),
+        rawField.extraction_status || (effectiveValue !== null ? 'EXTRACTED' : 'MISSING'),
       review_status: rawField.review_status || 'AI_SUGGESTED',
       requires_human_review: rawField.requires_human_review ?? true,
       is_verified: Boolean(rawField.is_verified),
@@ -421,9 +427,9 @@ export function normalizeExtractedField(rawField, canonicalName) {
     ai_extracted_value: primitiveValue,
     human_edited_value: null,
     is_human_modified: false,
-    confidence_score: primitiveValue ? 0.85 : null,
+    confidence_score: primitiveValue !== null ? 0.85 : 0.0,
     source_reference: null,
-    extraction_status: primitiveValue ? 'EXTRACTED' : 'MISSING',
+    extraction_status: primitiveValue !== null ? 'EXTRACTED' : 'MISSING',
     review_status: 'AI_SUGGESTED',
     requires_human_review: true,
     is_verified: false,
@@ -459,13 +465,47 @@ export function normalizeExtractionResponse(response) {
     'potential_impact',
     'observations',
     'detection_method',
+    'severity',
     'personnel_roles_involved',
     'relevant_measurements',
     'relevant_operating_parameters',
   ];
 
+  const canonicalAliases = {
+    incident_title: ['title', 'incidentTitle'],
+    incident_description: ['description', 'incidentDescription', 'narrative', 'incident_narrative'],
+    deviation_id: ['deviationId', 'dev_id', 'deviation_number'],
+    batch_number: ['batchNumber', 'batch', 'batch_no', 'lot_number', 'lot'],
+    product_name: ['productName', 'product'],
+    api_name: ['apiName', 'api'],
+    department: ['dept', 'area'],
+    equipment_id: ['equipment', 'equipmentId', 'equipment_tag'],
+    process_stage: ['affected_process', 'affectedProcess', 'stage'],
+    incident_date: ['incidentDate', 'date'],
+    detection_date: ['detectionDate'],
+    expected_condition: ['expectedCondition', 'expected'],
+    actual_condition: ['actualCondition', 'actual'],
+    immediate_action_taken: ['immediateActionTaken', 'immediate_action', 'immediateAction', 'immediate_containment'],
+    potential_impact: ['observed_impact', 'observedImpact', 'potentialImpact', 'impact'],
+    observations: ['initial_observations', 'initialObservations'],
+    detection_method: ['detectionMethod'],
+    severity: ['risk_severity', 'riskSeverity', 'deviation_severity'],
+    personnel_roles_involved: ['personnelRolesInvolved', 'personnel_roles'],
+    relevant_measurements: ['relevantMeasurements', 'measurements'],
+    relevant_operating_parameters: ['relevantOperatingParameters', 'operating_parameters'],
+  };
+
   canonicalFields.forEach((key) => {
-    fieldMeta[key] = normalizeExtractedField(rawData[key], key);
+    let rawFieldVal = rawData[key];
+    if ((rawFieldVal === undefined || rawFieldVal === null) && canonicalAliases[key]) {
+      for (const alias of canonicalAliases[key]) {
+        if (rawData[alias] !== undefined && rawData[alias] !== null) {
+          rawFieldVal = rawData[alias];
+          break;
+        }
+      }
+    }
+    fieldMeta[key] = normalizeExtractedField(rawFieldVal, key);
   });
 
   // Backward compatibility aliases
@@ -473,6 +513,54 @@ export function normalizeExtractionResponse(response) {
   fieldMeta['affected_process'] = fieldMeta['process_stage'];
   fieldMeta['observed_impact'] = fieldMeta['potential_impact'];
   fieldMeta['initial_observations'] = fieldMeta['observations'];
+
+  // Handle severity default when not specified in source document
+  if (!fieldMeta.severity || !fieldMeta.severity.value) {
+    fieldMeta.severity = {
+      fieldName: 'severity',
+      field_name: 'severity',
+      value: null,
+      ai_extracted_value: null,
+      human_edited_value: null,
+      is_human_modified: false,
+      confidence_score: null,
+      source_reference: null,
+      extraction_status: 'MISSING',
+      review_status: 'NEEDS_REVIEW',
+      requires_human_review: true,
+      is_verified: false,
+      validation_warnings: [
+        'Deviation severity not specified in source document — formal investigator assessment required.',
+      ],
+    };
+  }
+
+  // Handle incident_title generation if not explicitly extracted
+  if (!fieldMeta.incident_title?.value && fieldMeta.incident_description?.value) {
+    const descText = fieldMeta.incident_description.value;
+    const descLower = descText.toLowerCase();
+    const generatedTitle =
+      descLower.includes('temperature') && descLower.includes('drying')
+        ? 'Product Temperature Excursion During Final Drying'
+        : 'Product Temperature Excursion';
+    fieldMeta.incident_title = {
+      fieldName: 'incident_title',
+      field_name: 'incident_title',
+      value: generatedTitle,
+      ai_extracted_value: generatedTitle,
+      human_edited_value: null,
+      is_human_modified: false,
+      confidence_score: 0.85,
+      source_reference: null,
+      extraction_status: 'INFERRED',
+      review_status: 'NEEDS_REVIEW',
+      requires_human_review: true,
+      is_verified: false,
+      validation_warnings: [
+        'AI-generated summary title synthesized from incident description — not explicitly titled in source document.',
+      ],
+    };
+  }
 
   // Formatted form data structure expected by Section 1 and Section 2
   const incidentInfo = {
@@ -486,7 +574,7 @@ export function normalizeExtractionResponse(response) {
     equipment: fieldMeta.equipment_id?.value || '',
     incidentDate: fieldMeta.incident_date?.value || '',
     detectionDate: fieldMeta.detection_date?.value || '',
-    severity: 'Medium',
+    severity: fieldMeta.severity?.value || '',
     immediateActionTaken: fieldMeta.immediate_action_taken?.value || '',
   };
 

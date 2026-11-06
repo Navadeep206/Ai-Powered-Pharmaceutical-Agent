@@ -13,6 +13,83 @@ import {
   normalizeFishbone,
 } from '../../utils/normalizers';
 
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5-minute freshness TTL
+
+export const parseInvestigationArg = (arg) => {
+  if (typeof arg === 'object' && arg !== null) {
+    const id = arg.id || arg.investigationId;
+    return { id: id ? String(id) : null, force: Boolean(arg.force) };
+  }
+  return { id: arg ? String(arg) : null, force: false };
+};
+
+export const createEmptyCacheEntry = (id) => ({
+  id,
+  details: { data: null, status: 'idle', error: null, statusCode: null, lastFetched: null },
+  rca: { data: null, status: 'idle', error: null, lastFetched: null },
+  evidence: { data: [], status: 'idle', error: null, lastFetched: null },
+  capa: { data: [], status: 'idle', error: null, lastFetched: null },
+  documents: { data: [], status: 'idle', error: null, lastFetched: null },
+  isInvalidated: false,
+});
+
+export const getOrCreateCacheEntry = (state, id) => {
+  if (!id) return null;
+  if (!state.cacheById) {
+    state.cacheById = {};
+  }
+  if (!state.cacheById[id]) {
+    state.cacheById[id] = createEmptyCacheEntry(id);
+  }
+  return state.cacheById[id];
+};
+
+const syncActiveMirrors = (state, id) => {
+  if (!id || state.activeInvestigationId !== id) return;
+  const entry = state.cacheById?.[id];
+  if (!entry) return;
+
+  state.detailLoading = entry.details.status === 'pending';
+  state.detailError = entry.details.error;
+  state.detailStatusCode = entry.details.statusCode;
+  state.currentInvestigation = entry.details.data;
+
+  state.rcaLoading = entry.rca.status === 'pending';
+  state.rcaError = entry.rca.error;
+  state.rca = entry.rca.data;
+
+  state.evidenceLoading = entry.evidence.status === 'pending';
+  state.evidenceError = entry.evidence.error;
+  state.evidence = Array.isArray(entry.evidence.data) ? entry.evidence.data : [];
+
+  state.capaLoading = entry.capa.status === 'pending';
+  state.capaError = entry.capa.error;
+  state.capa = Array.isArray(entry.capa.data) ? entry.capa.data : [];
+
+  if (state.currentInvestigation) {
+    if (entry.rca.data?.five_whys?.length > 0) {
+      state.currentInvestigation.fiveWhys = normalizeFiveWhys(entry.rca.data.five_whys);
+    }
+    if (entry.rca.data?.fishbone_causes?.length > 0) {
+      state.currentInvestigation.fishbone = normalizeFishbone(entry.rca.data.fishbone_causes);
+    }
+    state.currentInvestigation.evidence = Array.isArray(entry.evidence.data) ? entry.evidence.data : [];
+    state.currentInvestigation.capa = Array.isArray(entry.capa.data) ? entry.capa.data : [];
+    state.currentInvestigation.documents = Array.isArray(entry.documents.data) ? entry.documents.data : [];
+  }
+};
+
+function serializeListParams(params = {}) {
+  const clean = {};
+  if (params.page) clean.page = params.page;
+  if (params.limit) clean.limit = params.limit;
+  if (params.search && params.search.trim()) clean.search = params.search.trim();
+  if (params.status && params.status !== 'ALL') clean.status = params.status;
+  if (params.severity && params.severity !== 'ALL') clean.severity = params.severity;
+  if (params.department && params.department !== 'ALL') clean.department = params.department;
+  return JSON.stringify(clean);
+}
+
 export const fetchInvestigations = createAsyncThunk(
   'investigations/fetchList',
   async (params = {}, { rejectWithValue }) => {
@@ -36,12 +113,35 @@ export const fetchInvestigations = createAsyncThunk(
         isNetworkError: Boolean(err.isNetworkError),
       });
     }
+  },
+  {
+    condition: (params = {}, { getState }) => {
+      const { investigations } = getState();
+      if (investigations.listLoading && !params.force) {
+        return false;
+      }
+      if (params.force) return true;
+
+      const isFresh =
+        investigations.listLastFetched &&
+        Date.now() - investigations.listLastFetched < CACHE_TTL_MS;
+
+      if (
+        isFresh &&
+        serializeListParams(investigations.listParams) === serializeListParams(params)
+      ) {
+        return false;
+      }
+
+      return true;
+    },
   }
 );
 
 export const fetchInvestigationById = createAsyncThunk(
   'investigations/fetchById',
-  async (id, { rejectWithValue }) => {
+  async (arg, { rejectWithValue }) => {
+    const { id } = parseInvestigationArg(arg);
     try {
       const data = await investigationService.getInvestigation(id);
       return normalizeInvestigation(data);
@@ -52,6 +152,32 @@ export const fetchInvestigationById = createAsyncThunk(
         isNetworkError: Boolean(err.isNetworkError),
       });
     }
+  },
+  {
+    condition: (arg, { getState }) => {
+      const { id, force } = parseInvestigationArg(arg);
+      if (!id) return false;
+      if (force) return true;
+
+      const { investigations } = getState();
+      const cached = investigations.cacheById?.[id]?.details;
+
+      if (cached?.status === 'pending') {
+        return false;
+      }
+
+      const isFresh = cached?.lastFetched && Date.now() - cached.lastFetched < CACHE_TTL_MS;
+      if (
+        cached?.status === 'fulfilled' &&
+        cached.data &&
+        isFresh &&
+        !investigations.cacheById?.[id]?.isInvalidated
+      ) {
+        return false;
+      }
+
+      return true;
+    },
   }
 );
 
@@ -88,7 +214,7 @@ export const analyzeIncidentIntake = createAsyncThunk(
         dispatch(setAnalysisProgress('uploading'));
         const uploadResult = await documentService.uploadDocument(file);
 
-        dispatch(setAnalysisProgress('extracting_text'));
+        dispatch(setAnalysisProgress('extracting'));
 
         // Handle scanned document requiring OCR
         const statusUpper = (uploadResult.extraction_status || '').toUpperCase();
@@ -106,7 +232,7 @@ export const analyzeIncidentIntake = createAsyncThunk(
           throw new Error('Please provide a descriptive incident narrative (at least 15 characters).');
         }
 
-        dispatch(setAnalysisProgress('analyzing'));
+        dispatch(setAnalysisProgress('extracting'));
         analysisPayload = {
           intake_method: 'Text',
           text_input: {
@@ -118,7 +244,7 @@ export const analyzeIncidentIntake = createAsyncThunk(
           throw new Error('Please provide an email subject header or body content to analyze.');
         }
 
-        dispatch(setAnalysisProgress('analyzing'));
+        dispatch(setAnalysisProgress('extracting'));
         analysisPayload = {
           intake_method: 'Email',
           email_input: {
@@ -130,8 +256,10 @@ export const analyzeIncidentIntake = createAsyncThunk(
         throw new Error(`Unsupported intake method: ${method}`);
       }
 
-      dispatch(setAnalysisProgress('validating'));
+      dispatch(setAnalysisProgress('analyzing'));
       const extractionResponse = await documentService.extractDocument(analysisPayload);
+
+      dispatch(setAnalysisProgress('results_ready'));
       const normalized = normalizeExtractionResponse(extractionResponse);
 
       return normalized;
@@ -142,12 +270,22 @@ export const analyzeIncidentIntake = createAsyncThunk(
         details: err.details || null,
       });
     }
+  },
+  {
+    condition: (_, { getState }) => {
+      const { investigations } = getState();
+      if (investigations.draftIntake?.extractionState === 'analyzing') {
+        return false;
+      }
+      return true;
+    },
   }
 );
 
 export const fetchInvestigationRCA = createAsyncThunk(
   'investigations/fetchRCA',
-  async (id, { rejectWithValue }) => {
+  async (arg, { rejectWithValue }) => {
+    const { id } = parseInvestigationArg(arg);
     try {
       const data = await rcaService.getRCA(id);
       return data;
@@ -157,6 +295,31 @@ export const fetchInvestigationRCA = createAsyncThunk(
         statusCode: err.statusCode || null,
       });
     }
+  },
+  {
+    condition: (arg, { getState }) => {
+      const { id, force } = parseInvestigationArg(arg);
+      if (!id) return false;
+      if (force) return true;
+
+      const { investigations } = getState();
+      const cached = investigations.cacheById?.[id]?.rca;
+
+      if (cached?.status === 'pending') {
+        return false;
+      }
+
+      const isFresh = cached?.lastFetched && Date.now() - cached.lastFetched < CACHE_TTL_MS;
+      if (
+        cached?.status === 'fulfilled' &&
+        isFresh &&
+        !investigations.cacheById?.[id]?.isInvalidated
+      ) {
+        return false;
+      }
+
+      return true;
+    },
   }
 );
 
@@ -234,7 +397,8 @@ export const generateInvestigationRCA = createAsyncThunk(
 
 export const fetchInvestigationEvidence = createAsyncThunk(
   'investigations/fetchEvidence',
-  async (id, { rejectWithValue }) => {
+  async (arg, { rejectWithValue }) => {
+    const { id } = parseInvestigationArg(arg);
     try {
       const data = await evidenceService.listEvidence(id);
       return (data || []).map(normalizeEvidence);
@@ -244,6 +408,31 @@ export const fetchInvestigationEvidence = createAsyncThunk(
         statusCode: err.statusCode || null,
       });
     }
+  },
+  {
+    condition: (arg, { getState }) => {
+      const { id, force } = parseInvestigationArg(arg);
+      if (!id) return false;
+      if (force) return true;
+
+      const { investigations } = getState();
+      const cached = investigations.cacheById?.[id]?.evidence;
+
+      if (cached?.status === 'pending') {
+        return false;
+      }
+
+      const isFresh = cached?.lastFetched && Date.now() - cached.lastFetched < CACHE_TTL_MS;
+      if (
+        cached?.status === 'fulfilled' &&
+        isFresh &&
+        !investigations.cacheById?.[id]?.isInvalidated
+      ) {
+        return false;
+      }
+
+      return true;
+    },
   }
 );
 
@@ -306,7 +495,8 @@ export const updateEvidenceStatusAsync = createAsyncThunk(
 
 export const fetchInvestigationCAPA = createAsyncThunk(
   'investigations/fetchCAPA',
-  async (id, { rejectWithValue }) => {
+  async (arg, { rejectWithValue }) => {
+    const { id } = parseInvestigationArg(arg);
     try {
       const data = await capaService.listCAPA(id);
       return (data || []).map(normalizeCAPA);
@@ -316,6 +506,31 @@ export const fetchInvestigationCAPA = createAsyncThunk(
         statusCode: err.statusCode || null,
       });
     }
+  },
+  {
+    condition: (arg, { getState }) => {
+      const { id, force } = parseInvestigationArg(arg);
+      if (!id) return false;
+      if (force) return true;
+
+      const { investigations } = getState();
+      const cached = investigations.cacheById?.[id]?.capa;
+
+      if (cached?.status === 'pending') {
+        return false;
+      }
+
+      const isFresh = cached?.lastFetched && Date.now() - cached.lastFetched < CACHE_TTL_MS;
+      if (
+        cached?.status === 'fulfilled' &&
+        isFresh &&
+        !investigations.cacheById?.[id]?.isInvalidated
+      ) {
+        return false;
+      }
+
+      return true;
+    },
   }
 );
 
@@ -423,9 +638,10 @@ export const updateCAPAStatusAsync = createAsyncThunk(
  */
 export const fetchInvestigationDocuments = createAsyncThunk(
   'investigations/fetchDocuments',
-  async (investigationId, { rejectWithValue }) => {
+  async (arg, { rejectWithValue }) => {
+    const { id } = parseInvestigationArg(arg);
     try {
-      const data = await investigationService.listDocuments(investigationId);
+      const data = await investigationService.listDocuments(id);
       return data;
     } catch (err) {
       return rejectWithValue({
@@ -433,6 +649,31 @@ export const fetchInvestigationDocuments = createAsyncThunk(
         statusCode: err.statusCode || null,
       });
     }
+  },
+  {
+    condition: (arg, { getState }) => {
+      const { id, force } = parseInvestigationArg(arg);
+      if (!id) return false;
+      if (force) return true;
+
+      const { investigations } = getState();
+      const cached = investigations.cacheById?.[id]?.documents;
+
+      if (cached?.status === 'pending') {
+        return false;
+      }
+
+      const isFresh = cached?.lastFetched && Date.now() - cached.lastFetched < CACHE_TTL_MS;
+      if (
+        cached?.status === 'fulfilled' &&
+        isFresh &&
+        !investigations.cacheById?.[id]?.isInvalidated
+      ) {
+        return false;
+      }
+
+      return true;
+    },
   }
 );
 
@@ -442,14 +683,20 @@ const initialState = {
   pagination: null,
   listLoading: false,
   listError: null,
+  listLastFetched: null,
+  listParams: null,
 
-  // Investigation Detail
+  // Per-investigation cache dictionary and active ID
+  activeInvestigationId: null,
+  cacheById: {},
+
+  // Investigation Detail (legacy singleton mirrors)
   currentInvestigation: null,
   detailLoading: false,
   detailError: null,
   detailStatusCode: null,
 
-  // Associated Tabs
+  // Associated Tabs (legacy singleton mirrors)
   rca: null,
   rcaLoading: false,
   rcaError: null,
@@ -482,6 +729,55 @@ export const investigationSlice = createSlice({
   name: 'investigations',
   initialState,
   reducers: {
+    setActiveInvestigationId: (state, action) => {
+      const id = action.payload ? String(action.payload) : null;
+      if (!id) {
+        state.activeInvestigationId = null;
+        state.currentInvestigation = null;
+        state.detailLoading = false;
+        state.detailError = null;
+        state.detailStatusCode = null;
+        state.rca = null;
+        state.rcaLoading = false;
+        state.rcaError = null;
+        state.evidence = [];
+        state.evidenceLoading = false;
+        state.evidenceError = null;
+        state.capa = [];
+        state.capaLoading = false;
+        state.capaError = null;
+        return;
+      }
+
+      const isSame = state.activeInvestigationId === id;
+      state.activeInvestigationId = id;
+
+      const entry = getOrCreateCacheEntry(state, id);
+      if (entry && entry.details.data) {
+        syncActiveMirrors(state, id);
+      } else if (!isSame) {
+        // Reset active mirrors to avoid displaying previous investigation data
+        state.currentInvestigation = null;
+        state.detailLoading = entry?.details.status === 'pending';
+        state.detailError = null;
+        state.detailStatusCode = null;
+        state.rca = null;
+        state.rcaLoading = entry?.rca.status === 'pending';
+        state.rcaError = null;
+        state.evidence = [];
+        state.evidenceLoading = entry?.evidence.status === 'pending';
+        state.evidenceError = null;
+        state.capa = [];
+        state.capaLoading = entry?.capa.status === 'pending';
+        state.capaError = null;
+      }
+    },
+    invalidateInvestigation: (state, action) => {
+      const id = action.payload ? String(action.payload) : state.activeInvestigationId;
+      if (id && state.cacheById?.[id]) {
+        state.cacheById[id].isInvalidated = true;
+      }
+    },
     clearInvestigationErrors: (state) => {
       state.listError = null;
       state.detailError = null;
@@ -547,6 +843,11 @@ export const investigationSlice = createSlice({
             incidentDate: 'incident_date',
             detectionDate: 'detection_date',
             immediateActionTaken: 'immediate_action_taken',
+          };
+          if (aliasMap[field]) targetMeta = state.draftIntake.extractedData.fieldMeta[aliasMap[field]];
+        } else if (!targetMeta && section === 'additionalContext') {
+          const aliasMap = {
+            detectionMethod: 'detection_method',
           };
           if (aliasMap[field]) targetMeta = state.draftIntake.extractedData.fieldMeta[aliasMap[field]];
         }
@@ -645,6 +946,11 @@ export const investigationSlice = createSlice({
       if (state.currentInvestigation && state.currentInvestigation.id === id) {
         if (incidentInfo) state.currentInvestigation.incidentInfo = { ...state.currentInvestigation.incidentInfo, ...incidentInfo };
         if (context) state.currentInvestigation.context = { ...state.currentInvestigation.context, ...context };
+      }
+      if (id && state.cacheById?.[id]?.details?.data) {
+        const cached = state.cacheById[id].details.data;
+        if (incidentInfo) cached.incidentInfo = { ...cached.incidentInfo, ...incidentInfo };
+        if (context) cached.context = { ...cached.context, ...context };
       }
     },
     updateFiveWhysLevel: (state, action) => {
@@ -750,6 +1056,8 @@ export const investigationSlice = createSlice({
         state.investigations = action.payload.items;
         state.pagination = action.payload.pagination;
         state.listError = null;
+        state.listLastFetched = Date.now();
+        state.listParams = action.meta?.arg || {};
       })
       .addCase(fetchInvestigations.rejected, (state, action) => {
         state.listLoading = false;
@@ -757,28 +1065,78 @@ export const investigationSlice = createSlice({
       })
 
       // Fetch by ID
-      .addCase(fetchInvestigationById.pending, (state) => {
-        state.detailLoading = true;
-        state.detailError = null;
-        state.detailStatusCode = null;
+      .addCase(fetchInvestigationById.pending, (state, action) => {
+        const { id } = parseInvestigationArg(action.meta?.arg);
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          entry.details.status = 'pending';
+          entry.details.error = null;
+          entry.details.statusCode = null;
+        }
+        if (!state.activeInvestigationId || state.activeInvestigationId === id) {
+          state.activeInvestigationId = id;
+          state.detailLoading = true;
+          state.detailError = null;
+          state.detailStatusCode = null;
+        }
       })
       .addCase(fetchInvestigationById.fulfilled, (state, action) => {
-        state.detailLoading = false;
-        state.currentInvestigation = action.payload;
-        state.detailError = null;
-        state.detailStatusCode = null;
+        const { id } = parseInvestigationArg(action.meta?.arg);
+        const targetId = id || action.payload?.id;
+        if (targetId) {
+          const entry = getOrCreateCacheEntry(state, targetId);
+          entry.details.data = action.payload;
+          entry.details.status = 'fulfilled';
+          entry.details.error = null;
+          entry.details.statusCode = null;
+          entry.details.lastFetched = Date.now();
+          entry.isInvalidated = false;
+        }
+        if (!state.activeInvestigationId || state.activeInvestigationId === targetId) {
+          state.activeInvestigationId = targetId;
+          state.detailLoading = false;
+          state.currentInvestigation = action.payload;
+          state.detailError = null;
+          state.detailStatusCode = null;
+          syncActiveMirrors(state, targetId);
+        }
       })
       .addCase(fetchInvestigationById.rejected, (state, action) => {
-        state.detailLoading = false;
-        state.currentInvestigation = null;
-        state.detailError = action.payload?.message || 'Failed to retrieve investigation.';
-        state.detailStatusCode = action.payload?.statusCode || null;
+        const { id } = parseInvestigationArg(action.meta?.arg);
+        const isNotFound = action.payload?.statusCode === 404;
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          entry.details.status = 'rejected';
+          entry.details.error = action.payload?.message || 'Failed to retrieve investigation.';
+          entry.details.statusCode = action.payload?.statusCode || null;
+          if (isNotFound) {
+            entry.details.data = null;
+          }
+        }
+        if (!state.activeInvestigationId || state.activeInvestigationId === id) {
+          state.detailLoading = false;
+          if (isNotFound || !state.currentInvestigation) {
+            state.currentInvestigation = null;
+          }
+          state.detailError = action.payload?.message || 'Failed to retrieve investigation.';
+          state.detailStatusCode = action.payload?.statusCode || null;
+        }
       })
 
       // Create
       .addCase(createInvestigationAsync.fulfilled, (state, action) => {
         state.investigations.unshift(action.payload);
+        state.listLastFetched = Date.now();
         state.currentInvestigation = action.payload;
+        const targetId = action.payload?.id;
+        if (targetId) {
+          const entry = getOrCreateCacheEntry(state, targetId);
+          entry.details.data = action.payload;
+          entry.details.status = 'fulfilled';
+          entry.details.error = null;
+          entry.details.lastFetched = Date.now();
+          state.activeInvestigationId = targetId;
+        }
       })
 
       // AI Intake Extraction
@@ -801,25 +1159,52 @@ export const investigationSlice = createSlice({
       })
 
       // RCA - Fetch
-      .addCase(fetchInvestigationRCA.pending, (state) => {
-        state.rcaLoading = true;
-        state.rcaError = null;
+      .addCase(fetchInvestigationRCA.pending, (state, action) => {
+        const { id } = parseInvestigationArg(action.meta?.arg);
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          entry.rca.status = 'pending';
+          entry.rca.error = null;
+        }
+        if (!state.activeInvestigationId || state.activeInvestigationId === id) {
+          state.rcaLoading = true;
+          state.rcaError = null;
+        }
       })
       .addCase(fetchInvestigationRCA.fulfilled, (state, action) => {
-        state.rcaLoading = false;
-        state.rca = action.payload;
-        if (state.currentInvestigation) {
-          if (action.payload.five_whys?.length > 0) {
-            state.currentInvestigation.fiveWhys = normalizeFiveWhys(action.payload.five_whys);
-          }
-          if (action.payload.fishbone_causes?.length > 0) {
-            state.currentInvestigation.fishbone = normalizeFishbone(action.payload.fishbone_causes);
+        const { id } = parseInvestigationArg(action.meta?.arg);
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          entry.rca.data = action.payload;
+          entry.rca.status = 'fulfilled';
+          entry.rca.error = null;
+          entry.rca.lastFetched = Date.now();
+        }
+        if (!state.activeInvestigationId || state.activeInvestigationId === id) {
+          state.rcaLoading = false;
+          state.rca = action.payload;
+          state.rcaError = null;
+          if (state.currentInvestigation) {
+            if (action.payload.five_whys?.length > 0) {
+              state.currentInvestigation.fiveWhys = normalizeFiveWhys(action.payload.five_whys);
+            }
+            if (action.payload.fishbone_causes?.length > 0) {
+              state.currentInvestigation.fishbone = normalizeFishbone(action.payload.fishbone_causes);
+            }
           }
         }
       })
       .addCase(fetchInvestigationRCA.rejected, (state, action) => {
-        state.rcaLoading = false;
-        state.rcaError = action.payload?.message || 'Failed to retrieve RCA analysis.';
+        const { id } = parseInvestigationArg(action.meta?.arg);
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          entry.rca.status = 'rejected';
+          entry.rca.error = action.payload?.message || 'Failed to retrieve RCA analysis.';
+        }
+        if (!state.activeInvestigationId || state.activeInvestigationId === id) {
+          state.rcaLoading = false;
+          state.rcaError = action.payload?.message || 'Failed to retrieve RCA analysis.';
+        }
       })
 
       // RCA - Save
@@ -830,6 +1215,14 @@ export const investigationSlice = createSlice({
       .addCase(saveInvestigationRCA.fulfilled, (state, action) => {
         state.rcaLoading = false;
         state.rca = action.payload;
+        const id = action.meta?.arg?.investigationId;
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          entry.rca.data = action.payload;
+          entry.rca.status = 'fulfilled';
+          entry.rca.error = null;
+          entry.rca.lastFetched = Date.now();
+        }
         if (state.currentInvestigation) {
           if (action.payload.five_whys?.length > 0) {
             state.currentInvestigation.fiveWhys = normalizeFiveWhys(action.payload.five_whys);
@@ -852,6 +1245,22 @@ export const investigationSlice = createSlice({
       .addCase(generateInvestigationRCA.fulfilled, (state, action) => {
         state.rcaLoading = false;
         state.rca = action.payload;
+        const id = action.meta?.arg?.investigationId;
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          entry.rca.data = action.payload;
+          entry.rca.status = 'fulfilled';
+          entry.rca.error = null;
+          entry.rca.lastFetched = Date.now();
+          if (action.payload.evidence_assessment?.length > 0) {
+            const newEvidences = action.payload.evidence_assessment.map(normalizeEvidence);
+            entry.evidence.data = [
+              ...newEvidences,
+              ...(Array.isArray(entry.evidence.data) ? entry.evidence.data : []),
+            ];
+            entry.evidence.lastFetched = Date.now();
+          }
+        }
         if (state.currentInvestigation) {
           if (action.payload.five_whys_analysis?.length > 0) {
             state.currentInvestigation.fiveWhys = normalizeFiveWhys(action.payload.five_whys_analysis);
@@ -874,24 +1283,61 @@ export const investigationSlice = createSlice({
       })
 
       // Evidence - Fetch
-      .addCase(fetchInvestigationEvidence.pending, (state) => {
-        state.evidenceLoading = true;
-        state.evidenceError = null;
+      .addCase(fetchInvestigationEvidence.pending, (state, action) => {
+        const { id } = parseInvestigationArg(action.meta?.arg);
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          entry.evidence.status = 'pending';
+          entry.evidence.error = null;
+        }
+        if (!state.activeInvestigationId || state.activeInvestigationId === id) {
+          state.evidenceLoading = true;
+          state.evidenceError = null;
+        }
       })
       .addCase(fetchInvestigationEvidence.fulfilled, (state, action) => {
-        state.evidenceLoading = false;
-        state.evidence = action.payload;
-        if (state.currentInvestigation) {
-          state.currentInvestigation.evidence = action.payload;
+        const { id } = parseInvestigationArg(action.meta?.arg);
+        const items = Array.isArray(action.payload) ? action.payload : [];
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          entry.evidence.data = items;
+          entry.evidence.status = 'fulfilled';
+          entry.evidence.error = null;
+          entry.evidence.lastFetched = Date.now();
+        }
+        if (!state.activeInvestigationId || state.activeInvestigationId === id) {
+          state.evidenceLoading = false;
+          state.evidence = items;
+          state.evidenceError = null;
+          if (state.currentInvestigation) {
+            state.currentInvestigation.evidence = items;
+          }
         }
       })
       .addCase(fetchInvestigationEvidence.rejected, (state, action) => {
-        state.evidenceLoading = false;
-        state.evidenceError = action.payload?.message || 'Failed to retrieve evidence.';
+        const { id } = parseInvestigationArg(action.meta?.arg);
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          entry.evidence.status = 'rejected';
+          entry.evidence.error = action.payload?.message || 'Failed to retrieve evidence.';
+        }
+        if (!state.activeInvestigationId || state.activeInvestigationId === id) {
+          state.evidenceLoading = false;
+          state.evidenceError = action.payload?.message || 'Failed to retrieve evidence.';
+        }
       })
 
       // Evidence - Create
       .addCase(createEvidenceRecord.fulfilled, (state, action) => {
+        const id = action.meta?.arg?.investigationId;
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          if (!Array.isArray(entry.evidence.data)) {
+            entry.evidence.data = [];
+          }
+          entry.evidence.data.unshift(action.payload);
+          entry.evidence.lastFetched = Date.now();
+        }
         if (state.currentInvestigation) {
           if (!state.currentInvestigation.evidence) state.currentInvestigation.evidence = [];
           state.currentInvestigation.evidence.unshift(action.payload);
@@ -901,6 +1347,17 @@ export const investigationSlice = createSlice({
 
       // Evidence - Update Status
       .addCase(updateEvidenceStatusAsync.fulfilled, (state, action) => {
+        const id = action.meta?.arg?.investigationId;
+        if (id && state.cacheById?.[id]?.evidence?.data) {
+          const list = state.cacheById[id].evidence.data;
+          const idx = list.findIndex(
+            (e) => e.id === action.payload.id || e.evidence_id === action.payload.evidence_id
+          );
+          if (idx !== -1) {
+            list[idx] = action.payload;
+          }
+          state.cacheById[id].evidence.lastFetched = Date.now();
+        }
         if (state.currentInvestigation && Array.isArray(state.currentInvestigation.evidence)) {
           const idx = state.currentInvestigation.evidence.findIndex(
             (e) => e.id === action.payload.id || e.evidence_id === action.payload.evidence_id
@@ -918,20 +1375,48 @@ export const investigationSlice = createSlice({
       })
 
       // CAPA - Fetch
-      .addCase(fetchInvestigationCAPA.pending, (state) => {
-        state.capaLoading = true;
-        state.capaError = null;
+      .addCase(fetchInvestigationCAPA.pending, (state, action) => {
+        const { id } = parseInvestigationArg(action.meta?.arg);
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          entry.capa.status = 'pending';
+          entry.capa.error = null;
+        }
+        if (!state.activeInvestigationId || state.activeInvestigationId === id) {
+          state.capaLoading = true;
+          state.capaError = null;
+        }
       })
       .addCase(fetchInvestigationCAPA.fulfilled, (state, action) => {
-        state.capaLoading = false;
-        state.capa = action.payload;
-        if (state.currentInvestigation) {
-          state.currentInvestigation.capa = action.payload;
+        const { id } = parseInvestigationArg(action.meta?.arg);
+        const items = Array.isArray(action.payload) ? action.payload : [];
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          entry.capa.data = items;
+          entry.capa.status = 'fulfilled';
+          entry.capa.error = null;
+          entry.capa.lastFetched = Date.now();
+        }
+        if (!state.activeInvestigationId || state.activeInvestigationId === id) {
+          state.capaLoading = false;
+          state.capa = items;
+          state.capaError = null;
+          if (state.currentInvestigation) {
+            state.currentInvestigation.capa = items;
+          }
         }
       })
       .addCase(fetchInvestigationCAPA.rejected, (state, action) => {
-        state.capaLoading = false;
-        state.capaError = action.payload?.message || 'Failed to retrieve CAPA records.';
+        const { id } = parseInvestigationArg(action.meta?.arg);
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          entry.capa.status = 'rejected';
+          entry.capa.error = action.payload?.message || 'Failed to retrieve CAPA records.';
+        }
+        if (!state.activeInvestigationId || state.activeInvestigationId === id) {
+          state.capaLoading = false;
+          state.capaError = action.payload?.message || 'Failed to retrieve CAPA records.';
+        }
       })
 
       // CAPA - Generate
@@ -942,6 +1427,14 @@ export const investigationSlice = createSlice({
       .addCase(generateCAPAActions.fulfilled, (state, action) => {
         state.capaLoading = false;
         const normalizedList = (action.payload.capa_recommendations || []).map(normalizeCAPA);
+        const id = action.meta?.arg?.investigationId;
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          entry.capa.data = normalizedList;
+          entry.capa.status = 'fulfilled';
+          entry.capa.error = null;
+          entry.capa.lastFetched = Date.now();
+        }
         if (state.currentInvestigation) {
           state.currentInvestigation.capa = normalizedList;
         }
@@ -954,6 +1447,15 @@ export const investigationSlice = createSlice({
 
       // CAPA - Create
       .addCase(createCAPAAction.fulfilled, (state, action) => {
+        const id = action.meta?.arg?.investigationId;
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          if (!Array.isArray(entry.capa.data)) {
+            entry.capa.data = [];
+          }
+          entry.capa.data.unshift(action.payload);
+          entry.capa.lastFetched = Date.now();
+        }
         if (state.currentInvestigation) {
           if (!state.currentInvestigation.capa) state.currentInvestigation.capa = [];
           state.currentInvestigation.capa.unshift(action.payload);
@@ -970,6 +1472,14 @@ export const investigationSlice = createSlice({
         state.capaLoading = false;
         if (action.payload?.capa_recommendations?.length > 0) {
           const normalizedList = action.payload.capa_recommendations.map(normalizeCAPA);
+          const id = action.meta?.arg?.investigationId;
+          if (id) {
+            const entry = getOrCreateCacheEntry(state, id);
+            entry.capa.data = normalizedList;
+            entry.capa.status = 'fulfilled';
+            entry.capa.error = null;
+            entry.capa.lastFetched = Date.now();
+          }
           if (state.currentInvestigation) {
             state.currentInvestigation.capa = normalizedList;
           }
@@ -983,6 +1493,17 @@ export const investigationSlice = createSlice({
 
       // CAPA - Update Status
       .addCase(updateCAPAStatusAsync.fulfilled, (state, action) => {
+        const id = action.meta?.arg?.investigationId;
+        if (id && state.cacheById?.[id]?.capa?.data) {
+          const list = state.cacheById[id].capa.data;
+          const idx = list.findIndex(
+            (c) => c.id === action.payload.id || c.action_id === action.payload.action_id
+          );
+          if (idx !== -1) {
+            list[idx] = action.payload;
+          }
+          state.cacheById[id].capa.lastFetched = Date.now();
+        }
         if (state.currentInvestigation && Array.isArray(state.currentInvestigation.capa)) {
           const idx = state.currentInvestigation.capa.findIndex(
             (c) => c.id === action.payload.id || c.action_id === action.payload.action_id
@@ -1000,15 +1521,42 @@ export const investigationSlice = createSlice({
       })
 
       // Documents - Fetch
+      .addCase(fetchInvestigationDocuments.pending, (state, action) => {
+        const { id } = parseInvestigationArg(action.meta?.arg);
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          entry.documents.status = 'pending';
+          entry.documents.error = null;
+        }
+      })
       .addCase(fetchInvestigationDocuments.fulfilled, (state, action) => {
-        if (state.currentInvestigation) {
-          state.currentInvestigation.documents = action.payload;
+        const { id } = parseInvestigationArg(action.meta?.arg);
+        const docs = Array.isArray(action.payload) ? action.payload : [];
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          entry.documents.data = docs;
+          entry.documents.status = 'fulfilled';
+          entry.documents.error = null;
+          entry.documents.lastFetched = Date.now();
+        }
+        if (state.currentInvestigation && (!state.activeInvestigationId || state.activeInvestigationId === id)) {
+          state.currentInvestigation.documents = docs;
+        }
+      })
+      .addCase(fetchInvestigationDocuments.rejected, (state, action) => {
+        const { id } = parseInvestigationArg(action.meta?.arg);
+        if (id) {
+          const entry = getOrCreateCacheEntry(state, id);
+          entry.documents.status = 'rejected';
+          entry.documents.error = action.payload?.message || 'Failed to retrieve documents.';
         }
       });
   },
 });
 
 export const {
+  setActiveInvestigationId,
+  invalidateInvestigation,
   clearInvestigationErrors,
   setIntakeMethod,
   setIntakeFile,

@@ -5,7 +5,7 @@ or .env files with safe non-secret defaults.
 """
 
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from urllib.parse import urlparse
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -33,10 +33,27 @@ class Settings(BaseSettings):
 
     # AI / LLM Configuration
     GROQ_API_KEY: str = "your_groq_api_key"
-    GROQ_MODEL: str = "qwen/qwen3.8-27b"
+    GROQ_MODEL: str = "openai/gpt-oss-120b"
     GROQ_TEMPERATURE: float = 0.0
-    GROQ_MAX_TOKENS: int = 1024
-    GROQ_TIMEOUT: float = 30.0
+    GROQ_MAX_TOKENS: int = 4096
+    GROQ_TIMEOUT: float = 60.0
+
+    def get_model_max_completion_tokens(self, model_name: Optional[str] = None) -> int:
+        """Return recommended completion token budget for the active or specified Groq model.
+
+        Ensures sufficient budget for structured schemas with citations, measurements, and GxP provenance.
+        """
+        model = (model_name or self.GROQ_MODEL).lower()
+        if "qwen" in model:
+            # Qwen models (e.g. qwen/qwen3.8-27b) support up to 16,384 completion tokens
+            return max(self.GROQ_MAX_TOKENS, 4096)
+        elif "llama-3.3" in model or "llama-3.1" in model:
+            # Llama 3.3/3.1 70B models support 8,192 completion tokens
+            return max(self.GROQ_MAX_TOKENS, 4096)
+        elif "gpt-oss" in model:
+            # GPT-OSS models support 8,192 completion tokens
+            return max(self.GROQ_MAX_TOKENS, 4096)
+        return max(self.GROQ_MAX_TOKENS, 2048)
 
     @property
     def is_groq_configured(self) -> bool:

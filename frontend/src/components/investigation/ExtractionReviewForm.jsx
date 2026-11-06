@@ -22,6 +22,7 @@ import {
   ChevronUp,
   Tag,
   BookOpen,
+  Sparkles,
 } from 'lucide-react';
 
 /**
@@ -53,12 +54,25 @@ function ReviewField({
   const isMissing = !value || extractionStatus === 'MISSING';
   const warnings = fieldMeta?.validation_warnings || [];
 
+  const isCitationUnverified = Boolean(
+    (sourceRef?.excerpt && sourceRef?.is_traceable === false) ||
+    warnings.some((w) => typeof w === 'string' && (w.toLowerCase().includes('citation unverified') || w.toLowerCase().includes('could not be matched')))
+  );
+
+  const isGeneratedSummary = Boolean(
+    extractionStatus === 'INFERRED' &&
+    (label?.toLowerCase().includes('title') ||
+     warnings.some((w) => typeof w === 'string' && (w.toLowerCase().includes('summary') || w.toLowerCase().includes('synthesized'))))
+  );
+
   return (
     <div className={`p-3.5 rounded-xl border transition-all ${
       contradiction
         ? 'border-[#FCA5A5] bg-[#FEF2F2]/30'
         : isHumanModified
         ? 'border-[#C7D2FE] bg-[#EEF2FF]/20'
+        : isCitationUnverified
+        ? 'border-[#FDE68A] bg-[#FFFBEB]/30'
         : isLowConfidence
         ? 'border-[#FDE68A] bg-[#FFFBEB]/20'
         : isMissing
@@ -82,6 +96,22 @@ function ReviewField({
             <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-[#F1F5F9] text-[#64748B] border border-[#CBD5E1]">
               Missing
             </span>
+          ) : isGeneratedSummary ? (
+            <span
+              className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-[#F3E8FF] text-[#6B21A8] border border-[#E9D5FF]"
+              title="AI-generated summary title synthesized from incident description — not explicitly titled in source document."
+            >
+              <Sparkles className="w-2.5 h-2.5 mr-1 text-[#9333EA]" />
+              AI Generated Summary
+            </span>
+          ) : extractionStatus === 'INFERRED' ? (
+            <span
+              className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]"
+              title={warnings.length ? warnings[0] : 'Inferred from contextual evidence — requires investigator review'}
+            >
+              <HelpCircle className="w-2.5 h-2.5 mr-1" />
+              Inferred
+            </span>
           ) : extractionStatus === 'AMBIGUOUS' ? (
             <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]">
               Ambiguous
@@ -92,17 +122,35 @@ function ReviewField({
             </span>
           )}
 
-          {/* Confidence Badge */}
+          {/* Citation Verification Status Badge */}
+          {isCitationUnverified ? (
+            <span
+              className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-[#FEF3C7] text-[#92400E] border border-[#FDE68A]"
+              title="The cited excerpt could not be matched at reported character offsets in the source text. Manual verification by an investigator is required."
+            >
+              <AlertTriangle className="w-2.5 h-2.5 mr-1 text-[#D97706]" />
+              Citation unverified — investigator review required
+            </span>
+          ) : sourceRef?.is_traceable && !isMissing ? (
+            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold bg-[#ECFDF5] text-[#065F46] border border-[#A7F3D0]">
+              <CheckCircle2 className="w-2.5 h-2.5 mr-1 text-[#059669]" />
+              Citation Verified
+            </span>
+          ) : null}
+
+          {/* Confidence Badge (Heuristic model confidence, clearly separated from verified evidence) */}
           {confidencePct !== null && (
             <span
               className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                isLowConfidence
+                isCitationUnverified
+                  ? 'bg-[#FEF3C7] text-[#92400E] border-[#FDE68A]'
+                  : isLowConfidence
                   ? 'bg-[#FEF3C7] text-[#B45309] border-[#FDE68A]'
                   : 'bg-[#F0FDF4] text-[#15803D] border-[#BBF7D0]'
               }`}
               title={`Confidence score heuristic: ${confidence}`}
             >
-              {isLowConfidence ? 'Low: ' : ''}{confidencePct}%
+              {isCitationUnverified ? `Confidence: ${Math.min(confidencePct, 70)}% (Unverified Citation)` : isLowConfidence ? `Low: ${confidencePct}%` : `${confidencePct}%`}
             </span>
           )}
 
@@ -160,17 +208,36 @@ function ReviewField({
 
       {/* Verbatim Source Citation Dropdown */}
       {showProvenance && sourceRef?.excerpt && (
-        <div className="mb-2.5 p-2.5 rounded-lg bg-[#F8FAFC] border border-[#CBD5E1] text-xs space-y-1">
+        <div className="mb-2.5 p-2.5 rounded-lg bg-[#F8FAFC] border border-[#CBD5E1] text-xs space-y-1.5">
           <div className="flex items-center justify-between text-[11px] font-semibold text-[#142B45]">
             <span className="flex items-center">
               <BookOpen className="w-3 h-3 mr-1 text-[#0F9D91]" />
               Source Intake Evidence
             </span>
-            <span className="text-[#64748B]">
-              {sourceRef.source_type || 'Narrative'}
-              {sourceRef.page_number ? ` • Page ${sourceRef.page_number}` : ''}
-            </span>
+            <div className="flex items-center space-x-2">
+              {isCitationUnverified ? (
+                <span className="text-[10px] text-[#92400E] font-medium flex items-center">
+                  <AlertTriangle className="w-2.5 h-2.5 mr-0.5 text-[#D97706]" />
+                  Unverified Offsets
+                </span>
+              ) : sourceRef.is_traceable ? (
+                <span className="text-[10px] text-[#065F46] font-medium flex items-center">
+                  <CheckCircle2 className="w-2.5 h-2.5 mr-0.5 text-[#059669]" />
+                  Verified in Source
+                </span>
+              ) : null}
+              <span className="text-[#64748B]">
+                {sourceRef.source_type || 'Narrative'}
+                {sourceRef.page_number ? ` • Page ${sourceRef.page_number}` : ''}
+              </span>
+            </div>
           </div>
+          {isCitationUnverified && (
+            <div className="p-2 rounded bg-[#FFFBEB] border border-[#FDE68A] text-[11px] text-[#92400E] flex items-center space-x-1.5">
+              <AlertCircle className="w-3.5 h-3.5 text-[#D97706] shrink-0" />
+              <span>Citation unverified — investigator review required. The cited excerpt could not be matched at reported character offsets in the source text.</span>
+            </div>
+          )}
           <blockquote className="p-1.5 bg-white rounded border border-[#E2E8F0] text-[11px] italic text-[#334155] leading-relaxed">
             &ldquo;{sourceRef.excerpt}&rdquo;
           </blockquote>
@@ -655,14 +722,16 @@ export default function ExtractionReviewForm({
 
             <ReviewField
               label="Deviation Severity"
-              value={incidentInfo.severity || 'Medium'}
-              fieldMeta={{
+              value={incidentInfo.severity || ''}
+              fieldMeta={fieldMeta.severity || {
                 is_human_modified: false,
-                confidence_score: 1.0,
-                extraction_status: 'EXTRACTED',
+                confidence_score: null,
+                extraction_status: 'MISSING',
+                validation_warnings: ['Deviation severity not specified in source document — formal investigator assessment required.'],
               }}
               type="select"
               options={[
+                { value: '', label: '-- Select Severity (Investigator Assessment Required) --' },
                 { value: 'Critical', label: 'Critical (Disposition Impact)' },
                 { value: 'High', label: 'High (Process Excursion)' },
                 { value: 'Medium', label: 'Medium (Minor OOS / Yield)' },
@@ -670,6 +739,7 @@ export default function ExtractionReviewForm({
               ]}
               disabled={!isEditing}
               required
+              helperText={!incidentInfo.severity ? 'Investigator assessment required prior to continuing to RCA.' : undefined}
               onChange={(val) => onUpdateField('incidentInfo', 'severity', val, 'severity')}
             />
           </div>
@@ -712,7 +782,7 @@ export default function ExtractionReviewForm({
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <ReviewField
               label="Equipment / Machinery Tag"
               value={incidentInfo.equipment}
@@ -736,6 +806,20 @@ export default function ExtractionReviewForm({
               required
               onChange={(val) => onUpdateField('incidentInfo', 'incidentDate', val, 'incident_date')}
               onRevert={onRevertField ? () => onRevertField('incidentInfo', 'incidentDate', 'incident_date') : null}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <ReviewField
+              label="Detection Method / Mechanism"
+              value={additionalContext.detectionMethod}
+              fieldMeta={fieldMeta.detection_method}
+              contradiction={getContradictionForField('detection_method')}
+              disabled={!isEditing}
+              placeholder="e.g. SCADA Temperature Alarm, Shift Log, In-Process Control (IPC)"
+              helperText="Mechanism or instrument through which deviation was identified"
+              onChange={(val) => onUpdateField('additionalContext', 'detectionMethod', val, 'detection_method')}
+              onRevert={onRevertField ? () => onRevertField('additionalContext', 'detectionMethod', 'detection_method') : null}
             />
 
             <ReviewField
@@ -834,8 +918,9 @@ export default function ExtractionReviewForm({
               fieldMeta={fieldMeta.potential_impact}
               contradiction={getContradictionForField('potential_impact')}
               disabled={!isEditing}
-              placeholder="e.g. Slurry discoloration, potential thermal degradation"
-              required
+              placeholder="e.g. Slurry discoloration, potential thermal degradation (if assessed)"
+              required={false}
+              helperText="Record if evaluated; leave empty if impact assessment is still pending"
               onChange={(val) => onUpdateField('context', 'observedImpact', val, 'potential_impact')}
               onRevert={onRevertField ? () => onRevertField('context', 'observedImpact', 'potential_impact') : null}
             />

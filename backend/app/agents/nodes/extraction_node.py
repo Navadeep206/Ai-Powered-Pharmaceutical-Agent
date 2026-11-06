@@ -117,7 +117,7 @@ def incident_extraction_node(state: ExtractionWorkflowState) -> Dict[str, Any]:
             "warnings": warnings + [err_msg],
         }
 
-    except (AIConfigurationError, AIModelUnavailableError, AIConnectionError) as err:
+    except (AIConfigurationError, AIModelUnavailableError, AIConnectionError, groq.BadRequestError) as err:
         err_msg = f"AI integration error: {err}"
         logger.error(err_msg)
         return {

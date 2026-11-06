@@ -58,6 +58,10 @@ class SourceReference(BaseModel):
         default=True,
         description="Indicates whether verbatim excerpt could be reliably located in source text",
     )
+    is_ambiguous: bool = Field(
+        default=False,
+        description="Indicates whether verbatim excerpt matches multiple locations in source text",
+    )
 
 
 class PossibleContradiction(BaseModel):

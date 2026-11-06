@@ -30,18 +30,21 @@ class AIService:
         self._client: Optional[ChatGroq] = None
         self._cached_config_key: Optional[str] = None
 
-    def get_client(self, force_refresh: bool = False) -> ChatGroq:
-        """Retrieve or initialize the singleton ChatGroq client.
+    def get_client(self, force_refresh: bool = False, max_tokens: Optional[int] = None) -> ChatGroq:
+        """Retrieve or initialize the ChatGroq client.
 
         Validates configuration before instantiation and avoids redundant client creation.
+        Uses model-aware completion token limits to prevent truncation.
         """
         if not settings.is_groq_configured:
             raise AIConfigurationError(
                 "Groq API key is not configured. Set GROQ_API_KEY in your environment or .env file."
             )
 
+        token_budget = max_tokens if max_tokens is not None else settings.get_model_max_completion_tokens()
+
         config_fingerprint = (
-            f"{settings.GROQ_MODEL}:{settings.GROQ_TEMPERATURE}:{settings.GROQ_MAX_TOKENS}:{settings.GROQ_TIMEOUT}"
+            f"{settings.GROQ_MODEL}:{settings.GROQ_TEMPERATURE}:{token_budget}:{settings.GROQ_TIMEOUT}"
         )
 
         if self._client is not None and not force_refresh and self._cached_config_key == config_fingerprint:
@@ -52,12 +55,13 @@ class AIService:
                 groq_api_key=settings.GROQ_API_KEY,
                 model_name=settings.GROQ_MODEL,
                 temperature=settings.GROQ_TEMPERATURE,
-                max_tokens=settings.GROQ_MAX_TOKENS,
+                max_tokens=token_budget,
                 request_timeout=settings.GROQ_TIMEOUT,
                 max_retries=2,
             )
-            self._client = client
-            self._cached_config_key = config_fingerprint
+            if max_tokens is None:
+                self._client = client
+                self._cached_config_key = config_fingerprint
             return client
         except Exception as err:
             logger.error("Failed to initialize Groq client: %s", err.__class__.__name__)
@@ -131,7 +135,7 @@ class AIService:
                 "provider": "Groq",
                 "model": settings.GROQ_MODEL,
                 "temperature": settings.GROQ_TEMPERATURE,
-                "max_tokens": settings.GROQ_MAX_TOKENS,
+                "max_tokens": settings.get_model_max_completion_tokens(),
                 "timeout": settings.GROQ_TIMEOUT,
                 "detail": f"Successfully established live connection to Groq model '{settings.GROQ_MODEL}'.",
                 "timestamp": timestamp,

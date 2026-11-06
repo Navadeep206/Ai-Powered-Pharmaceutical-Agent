@@ -30,6 +30,7 @@ import {
 } from '../../utils/normalizers';
 import {
   ArrowLeft,
+  ArrowRight,
   Sparkles,
   RotateCcw,
   AlertCircle,
@@ -129,6 +130,16 @@ export default function NewInvestigationPage() {
     setIsSubmitting(true);
     setValidationError(null);
 
+    const severityVal = extractedData.incidentInfo?.severity;
+    const validSeverities = ['Critical', 'High', 'Medium', 'Low'];
+    if (!severityVal || !validSeverities.includes(severityVal)) {
+      setValidationError(
+        'Deviation Severity has not been assigned. Please assess and select a severity level (Critical, High, Medium, or Low) based on investigator review before continuing to RCA.'
+      );
+      setIsSubmitting(false);
+      return;
+    }
+
     try {
       const payload = buildInvestigationPayloadFromReviewedData(extractedData);
       const resultAction = await dispatch(createInvestigationAsync(payload));
@@ -216,9 +227,152 @@ export default function NewInvestigationPage() {
         }
       />
 
-      {/* State A: Intake Input Selection State */}
-      {extractionState === 'idle' && (
+      {/* State: Intake, Analyzing, or Extraction Failed (Page always stays visible!) */}
+      {extractionState !== 'extracted' && (
         <div className="space-y-6">
+          {/* Active Error Banner when extraction failed */}
+          {extractionState === 'failed' && (
+            <Card className="border-[#FECACA] bg-[#FEF2F2]/50 shadow-xs">
+              <CardHeader className="pb-3">
+                <div className="flex items-center space-x-2.5 text-[#991B1B]">
+                  <AlertTriangle className="w-5 h-5 text-[#DC2626] shrink-0" />
+                  <CardTitle className="text-sm font-semibold text-[#991B1B]">AI Extraction Notice</CardTitle>
+                </div>
+                <CardDescription className="text-xs text-[#7F1D1D] mt-1">
+                  {extractionError ||
+                    validationError ||
+                    'The extraction pipeline could not process the provided intake content automatically.'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="pt-0 pb-3">
+                <p className="text-xs text-[#991B1B]">
+                  Your uploaded file and form inputs are preserved. You can retry the AI analysis, update the document, or proceed directly with manual entry.
+                </p>
+              </CardContent>
+              <CardFooter className="flex items-center justify-between py-3 px-6 bg-[#FEF2F2] border-t border-[#FCA5A5]/40">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  leftIcon={RotateCcw}
+                  onClick={handleResetIntake}
+                >
+                  Clear & Reset
+                </Button>
+                <div className="flex items-center space-x-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    leftIcon={Sparkles}
+                    onClick={handleAnalyzeIncident}
+                    disabled={extractionState === 'analyzing'}
+                  >
+                    Retry Analysis
+                  </Button>
+                  <Button
+                    variant="accent"
+                    size="sm"
+                    rightIcon={ArrowRight}
+                    onClick={handleProceedWithManualEntry}
+                  >
+                    Proceed with Manual Entry
+                  </Button>
+                </div>
+              </CardFooter>
+            </Card>
+          )}
+
+          {/* Real AI Analyzing Progress Card - Displayed while processing */}
+          {extractionState === 'analyzing' && (
+            <Card className="border-[#0F9D91]/30 bg-[#F0FDFA] shadow-xs">
+              <CardContent className="py-5 px-6 space-y-4">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#E6F7F5] text-[#0F9D91] flex items-center justify-center shrink-0 animate-pulse">
+                    <FileSearch className="w-5 h-5 text-[#0F9D91]" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-[#142B45]">
+                      Analyzing Quality Incident Intake
+                    </h3>
+                    <p className="text-xs text-[#64748B]">
+                      Processing incident through LangGraph extraction nodes and 21 CFR Part 11 entity mapping...
+                    </p>
+                  </div>
+                </div>
+
+                {/* 4-Step Progress Stepper: Uploading → Extracting document → AI analysis → Results ready */}
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-white p-3.5 rounded-xl border border-[#CCFBF1]">
+                  {/* Step 1: Uploading */}
+                  <div className="flex items-center space-x-2 text-xs">
+                    {analysisProgress === 'uploading' ? (
+                      <Loader2 className="w-4 h-4 text-[#0F9D91] animate-spin shrink-0" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4 text-[#059669] shrink-0" />
+                    )}
+                    <span className={analysisProgress === 'uploading' ? 'font-semibold text-[#142B45]' : 'text-[#059669]'}>
+                      1. Uploading
+                    </span>
+                  </div>
+
+                  {/* Step 2: Extracting document */}
+                  <div className="flex items-center space-x-2 text-xs">
+                    {analysisProgress === 'extracting' || analysisProgress === 'ocr_required' ? (
+                      <Loader2 className="w-4 h-4 text-[#0F9D91] animate-spin shrink-0" />
+                    ) : analysisProgress === 'analyzing' || analysisProgress === 'results_ready' || analysisProgress === 'completed' ? (
+                      <CheckCircle2 className="w-4 h-4 text-[#059669] shrink-0" />
+                    ) : (
+                      <div className="w-4 h-4 rounded-full border-2 border-[#CBD5E1] shrink-0" />
+                    )}
+                    <span className={
+                      analysisProgress === 'extracting' || analysisProgress === 'ocr_required'
+                        ? 'font-semibold text-[#142B45]'
+                        : analysisProgress === 'analyzing' || analysisProgress === 'results_ready' || analysisProgress === 'completed'
+                        ? 'text-[#059669]'
+                        : 'text-[#64748B]'
+                    }>
+                      2. Extracting document
+                    </span>
+                  </div>
+
+                  {/* Step 3: AI analysis */}
+                  <div className="flex items-center space-x-2 text-xs">
+                    {analysisProgress === 'analyzing' ? (
+                      <Loader2 className="w-4 h-4 text-[#0F9D91] animate-spin shrink-0" />
+                    ) : analysisProgress === 'results_ready' || analysisProgress === 'completed' ? (
+                      <CheckCircle2 className="w-4 h-4 text-[#059669] shrink-0" />
+                    ) : (
+                      <div className="w-4 h-4 rounded-full border-2 border-[#CBD5E1] shrink-0" />
+                    )}
+                    <span className={
+                      analysisProgress === 'analyzing'
+                        ? 'font-semibold text-[#142B45]'
+                        : analysisProgress === 'results_ready' || analysisProgress === 'completed'
+                        ? 'text-[#059669]'
+                        : 'text-[#64748B]'
+                    }>
+                      3. AI analysis
+                    </span>
+                  </div>
+
+                  {/* Step 4: Results ready */}
+                  <div className="flex items-center space-x-2 text-xs">
+                    {analysisProgress === 'results_ready' || analysisProgress === 'completed' ? (
+                      <CheckCircle2 className="w-4 h-4 text-[#059669] shrink-0" />
+                    ) : (
+                      <div className="w-4 h-4 rounded-full border-2 border-[#CBD5E1] shrink-0" />
+                    )}
+                    <span className={
+                      analysisProgress === 'results_ready' || analysisProgress === 'completed'
+                        ? 'font-semibold text-[#059669]'
+                        : 'text-[#64748B]'
+                    }>
+                      4. Results ready
+                    </span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Method Selector */}
           <div>
             <h3 className="text-xs font-semibold text-[#142B45] uppercase tracking-wider mb-2">
@@ -227,6 +381,7 @@ export default function NewInvestigationPage() {
             <IntakeMethodSelector
               selectedMethod={method}
               onSelectMethod={(m) => {
+                if (extractionState === 'analyzing') return;
                 dispatch(setIntakeMethod(m));
                 setValidationError(null);
               }}
@@ -257,6 +412,13 @@ export default function NewInvestigationPage() {
             </CardHeader>
 
             <CardContent>
+              {validationError && extractionState !== 'failed' && (
+                <div className="p-3 mb-4 bg-[#FEF2F2] border border-[#FECACA] rounded-lg text-xs text-[#991B1B] flex items-center space-x-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-[#DC2626]" />
+                  <span>{validationError}</span>
+                </div>
+              )}
+
               {method === 'upload' && (
                 <DocumentUpload
                   fileInfo={fileInfo}
@@ -309,142 +471,15 @@ export default function NewInvestigationPage() {
               <Button
                 variant="accent"
                 size="md"
-                leftIcon={Sparkles}
+                leftIcon={extractionState === 'analyzing' ? Loader2 : Sparkles}
+                disabled={extractionState === 'analyzing'}
                 onClick={handleAnalyzeIncident}
               >
-                Analyze Incident
+                {extractionState === 'analyzing' ? 'Analyzing Incident...' : 'Analyze Incident'}
               </Button>
             </CardFooter>
           </Card>
         </div>
-      )}
-
-      {/* State B: Real AI Analyzing Progress State */}
-      {extractionState === 'analyzing' && (
-        <Card className="py-12 px-6 shadow-md border-[#CBD5E1]">
-          <CardContent className="space-y-6 max-w-lg mx-auto text-center">
-            <div className="w-16 h-16 rounded-2xl bg-[#E6F7F5] text-[#0F9D91] flex items-center justify-center mx-auto shadow-inner animate-pulse">
-              <FileSearch className="w-8 h-8 text-[#0F9D91]" />
-            </div>
-
-            <div className="space-y-1">
-              <h3 className="text-lg font-bold text-[#142B45]">
-                Analyzing Quality Incident Intake
-              </h3>
-              <p className="text-xs text-[#64748B] leading-relaxed">
-                Orchestrating LangGraph extraction nodes, checking optical character requirements, and extracting GxP deviation parameters...
-              </p>
-            </div>
-
-            {/* Stepper Progress Breakdown */}
-            <div className="space-y-2.5 text-left bg-[#F8FAFC] p-4 rounded-xl border border-[#E2E8F0]">
-              <div className="flex items-center space-x-3 text-xs">
-                {analysisProgress === 'uploading' ? (
-                  <Loader2 className="w-4 h-4 text-[#0F9D91] animate-spin shrink-0" />
-                ) : (
-                  <CheckCircle2 className="w-4 h-4 text-[#059669] shrink-0" />
-                )}
-                <span className={analysisProgress === 'uploading' ? 'font-semibold text-[#142B45]' : 'text-[#64748B]'}>
-                  1. Preprocessing incident intake payload
-                </span>
-              </div>
-
-              <div className="flex items-center space-x-3 text-xs">
-                {analysisProgress === 'extracting_text' ? (
-                  <Loader2 className="w-4 h-4 text-[#0F9D91] animate-spin shrink-0" />
-                ) : analysisProgress === 'analyzing' || analysisProgress === 'validating' ? (
-                  <CheckCircle2 className="w-4 h-4 text-[#059669] shrink-0" />
-                ) : (
-                  <div className="w-4 h-4 rounded-full border-2 border-[#CBD5E1] shrink-0" />
-                )}
-                <span className={analysisProgress === 'extracting_text' ? 'font-semibold text-[#142B45]' : 'text-[#64748B]'}>
-                  2. Document text stream parsing & OCR verification
-                </span>
-              </div>
-
-              <div className="flex items-center space-x-3 text-xs">
-                {analysisProgress === 'analyzing' ? (
-                  <Loader2 className="w-4 h-4 text-[#0F9D91] animate-spin shrink-0" />
-                ) : analysisProgress === 'validating' ? (
-                  <CheckCircle2 className="w-4 h-4 text-[#059669] shrink-0" />
-                ) : (
-                  <div className="w-4 h-4 rounded-full border-2 border-[#CBD5E1] shrink-0" />
-                )}
-                <span className={analysisProgress === 'analyzing' ? 'font-semibold text-[#142B45]' : 'text-[#64748B]'}>
-                  3. LangGraph structured extraction & entity mapping
-                </span>
-              </div>
-
-              <div className="flex items-center space-x-3 text-xs">
-                {analysisProgress === 'validating' ? (
-                  <Loader2 className="w-4 h-4 text-[#0F9D91] animate-spin shrink-0" />
-                ) : (
-                  <div className="w-4 h-4 rounded-full border-2 border-[#CBD5E1] shrink-0" />
-                )}
-                <span className={analysisProgress === 'validating' ? 'font-semibold text-[#142B45]' : 'text-[#64748B]'}>
-                  4. Completeness scoring & provenance tracking
-                </span>
-              </div>
-            </div>
-
-            <div className="pt-2 flex items-center justify-center space-x-2 text-xs font-semibold text-[#0F9D91]">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Processing with LangGraph workflow...</span>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* State C: Failed Extraction / Fallback State */}
-      {extractionState === 'failed' && (
-        <Card className="border-[#FECACA] bg-white">
-          <CardHeader>
-            <div className="flex items-center space-x-2.5 text-[#991B1B]">
-              <AlertTriangle className="w-5 h-5 text-[#DC2626]" />
-              <CardTitle>AI Extraction Notice</CardTitle>
-            </div>
-            <CardDescription>
-              {extractionError ||
-                'The extraction pipeline could not process the provided intake content automatically.'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="p-3.5 rounded-xl bg-[#FFFBEB] border border-[#FDE68A] text-xs text-[#92400E] space-y-1">
-              <p className="font-semibold">Investigator Fallback Options:</p>
-              <p className="leading-relaxed">
-                You can proceed directly with manual form entry to record the investigation, or modify the source intake and retry analysis.
-              </p>
-            </div>
-          </CardContent>
-          <CardFooter className="flex items-center justify-between py-4 bg-[#F8FAFC]">
-            <Button
-              variant="secondary"
-              size="sm"
-              leftIcon={RotateCcw}
-              onClick={handleResetIntake}
-            >
-              Change Intake Source
-            </Button>
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                leftIcon={Sparkles}
-                onClick={handleAnalyzeIncident}
-              >
-                Retry Analysis
-              </Button>
-              <Button
-                variant="accent"
-                size="sm"
-                rightIcon={ArrowRight}
-                onClick={handleProceedWithManualEntry}
-              >
-                Proceed with Manual Entry
-              </Button>
-            </div>
-          </CardFooter>
-        </Card>
       )}
 
       {/* State D: Structured Extraction Review Experience */}

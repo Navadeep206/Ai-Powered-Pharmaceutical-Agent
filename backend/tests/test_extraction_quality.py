@@ -358,7 +358,7 @@ def test_invalid_confidence_values():
         assert any("exceeds 1.0" in w for w in batch_field.validation_warnings)
 
 
-# 8. Invalid date formats
+# 8. Invalid and valid date formats & normalization
 def test_invalid_date_formats():
     """Verify non-ISO dates generate validation warnings without fabricated conversions."""
     date_val, warns = extraction_quality_service.validate_date_format("March 2nd, 2026")
@@ -368,6 +368,87 @@ def test_invalid_date_formats():
     # Invalid calendar day (February 31)
     date_val_bad_day, warns_bad_day = extraction_quality_service.validate_date_format("2026-02-31")
     assert any("not a valid calendar date" in w for w in warns_bad_day)
+
+
+def test_date_normalization_formats():
+    """Verify supported date formats normalize to ISO-8601 YYYY-MM-DD or flag ambiguity without guessing."""
+    # 1. DD-Mon-YYYY (pharmaceutical incident standard)
+    d1 = extraction_quality_service.validate_date_format("04-Nov-2026")
+    assert d1.normalized_date == "2026-11-04"
+    assert len(d1.warnings) == 0
+    assert not d1.is_ambiguous
+
+    # 2. Mon DD, YYYY
+    d2 = extraction_quality_service.validate_date_format("Nov 04, 2026")
+    assert d2.normalized_date == "2026-11-04"
+    assert len(d2.warnings) == 0
+
+    # 3. Valid ISO-8601
+    d3 = extraction_quality_service.validate_date_format("2026-11-04")
+    assert d3.normalized_date == "2026-11-04"
+    assert len(d3.warnings) == 0
+
+    # 4. Unambiguous numeric date (DD > 12)
+    d4 = extraction_quality_service.validate_date_format("24/11/2026")
+    assert d4.normalized_date == "2026-11-24"
+    assert len(d4.warnings) == 0
+
+    # 5. Truly ambiguous numeric date (both <= 12)
+    d5 = extraction_quality_service.validate_date_format("04/11/2026")
+    assert d5.normalized_date == "04/11/2026"  # Preserved without guessing
+    assert d5.is_ambiguous is True
+    assert any("ambiguous" in w.lower() for w in d5.warnings)
+
+
+def test_traceability_resilience_to_whitespace_newlines_and_dashes():
+    """Verify source traceability validates excerpts across line-breaks and dash variations."""
+    source_snippet = "Batch number\nBATCH-API-26-041\nTemperature range: 48–52 °C."
+    
+    # 1. Whitespace / newline difference (PDF table row)
+    ref_newline = SourceReference(
+        source_type="Document",
+        excerpt="Batch number BATCH-API-26-041",
+        char_offset_start=0,
+        char_offset_end=29,  # len of "Batch number\nBATCH-API-26-041"
+    )
+    val_ref, warns = extraction_quality_service.validate_source_traceability(ref_newline, source_snippet)
+    assert val_ref.is_traceable is True
+    assert val_ref.char_offset_start == 0
+    assert val_ref.char_offset_end == 29
+    assert len(warns) == 0
+
+    # 2. Dash variation (en-dash in source vs hyphen in cited excerpt)
+    ref_dash = SourceReference(
+        source_type="Document",
+        excerpt="Temperature range: 48-52 °C.",
+        char_offset_start=30,
+        char_offset_end=58,
+    )
+    val_ref2, warns2 = extraction_quality_service.validate_source_traceability(ref_dash, source_snippet)
+    assert val_ref2.is_traceable is True
+    assert val_ref2.char_offset_start == 30
+    assert len(warns2) == 0
+
+
+def test_traceability_ellipsis_matching():
+    """Verify that multi-segment ellipsis excerpts validate when slice boundary tokens match."""
+    source_snippet = (
+        "During final drying of batch BATCH-API-26-041 in the fluid bed dryer, "
+        "the product temperature exceeded the upper limit and remained above 52 °C for approximately 22 minutes."
+    )
+    excerpt_ellipsis = "During final drying of batch BATCH-API-26-041 ... remained above 52 °C for approximately 22 minutes."
+
+    ref = SourceReference(
+        source_type="Document",
+        excerpt=excerpt_ellipsis,
+        char_offset_start=0,
+        char_offset_end=len(source_snippet),
+    )
+    val_ref, warns = extraction_quality_service.validate_source_traceability(ref, source_snippet)
+    assert val_ref.is_traceable is True
+    assert val_ref.char_offset_start == 0
+    assert val_ref.char_offset_end == len(source_snippet)
+    assert len(warns) == 0
 
 
 # 9. Invalid source offsets

@@ -50,6 +50,60 @@ FIELD_WEIGHTS: Dict[str, float] = {
 }
 
 
+class DateValidationResult(tuple):
+    """Tuple subclass returning (normalized_date, warnings) for backwards-compatibility,
+
+    while also providing .is_ambiguous attribute and .normalized_date property.
+    """
+
+    def __new__(cls, normalized_date: Optional[str], warnings: List[str], is_ambiguous: bool = False):
+        return super().__new__(cls, (normalized_date, warnings))
+
+    def __init__(self, normalized_date: Optional[str], warnings: List[str], is_ambiguous: bool = False):
+        self.is_ambiguous = is_ambiguous
+        self.normalized_date = normalized_date
+        self.warnings = warnings
+
+
+MONTH_MAP: Dict[str, int] = {
+    "jan": 1,
+    "january": 1,
+    "feb": 2,
+    "february": 2,
+    "mar": 3,
+    "march": 3,
+    "apr": 4,
+    "april": 4,
+    "may": 5,
+    "jun": 6,
+    "june": 6,
+    "jul": 7,
+    "july": 7,
+    "aug": 8,
+    "august": 8,
+    "sep": 9,
+    "sept": 9,
+    "september": 9,
+    "oct": 10,
+    "october": 10,
+    "nov": 11,
+    "november": 11,
+    "dec": 12,
+    "december": 12,
+}
+
+
+def normalize_text_for_comparison(text: str) -> str:
+    """Standardize typographically varied characters (dashes, quotes, non-breaking spaces) and whitespace."""
+    if not text:
+        return ""
+    t = re.sub(r"[\u00a0\u2000-\u200b\u202f\u205f\u3000\s]+", " ", text).strip()
+    t = re.sub(r"[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\x2d-]", "-", t)
+    t = re.sub(r"[\u2018\u2019\u201a\u201b\u2032']", "'", t)
+    t = re.sub(r"[\u201c\u201d\u201e\u201f\u2033\"]", '"', t)
+    return t
+
+
 class ExtractionQualityService:
     """Service providing quality assessment, contradiction analysis, and validation audits."""
 
@@ -60,36 +114,147 @@ class ExtractionQualityService:
     # 1. FIELD-LEVEL VALIDATION
     # -------------------------------------------------------------------------
 
-    def validate_date_format(self, date_str: Optional[str]) -> Tuple[Optional[str], List[str]]:
-        """Validate whether date conforms strictly to ISO-8601 (YYYY-MM-DD).
+    def validate_date_format(self, date_str: Optional[str]) -> DateValidationResult:
+        """Validate and normalize date format to ISO-8601 (YYYY-MM-DD).
 
-        Does NOT guess, extrapolate, or silently alter invalid dates.
+        Supports ISO-8601, named-month formats (e.g. 04-Nov-2026), and unambiguous numeric dates.
+        Truly ambiguous dates (e.g. 04/11/2026) are flagged with is_ambiguous=True without guessing.
+        Invalid calendar dates (e.g. 2026-02-31) and non-conforming formats emit explicit warnings.
         """
         if not date_str:
-            return None, []
+            return DateValidationResult(None, [])
 
         clean_date = date_str.strip()
-        warnings = []
 
-        # Check standard ISO YYYY-MM-DD pattern
-        iso_pattern = r"^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$"
-        if not re.match(iso_pattern, clean_date):
-            warnings.append(
+        # 1. ISO YYYY-MM-DD pattern
+        iso_pattern = r"^(\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$"
+        if re.match(iso_pattern, clean_date):
+            try:
+                datetime.strptime(clean_date, "%Y-%m-%d")
+                return DateValidationResult(clean_date, [])
+            except ValueError:
+                return DateValidationResult(
+                    clean_date,
+                    [f"Date value '{clean_date}' is not a valid calendar date. Human investigator verification is required."],
+                    is_ambiguous=False,
+                )
+
+        # 2. Named month formats: DD-Mon-YYYY, DD Mon YYYY, DD-Month-YYYY, etc.
+        d_mon_y = re.match(r"^(\d{1,2})[-/\s]+([A-Za-z]{3,9})[-/\s]+(\d{4})$", clean_date)
+        if d_mon_y:
+            day_val = int(d_mon_y.group(1))
+            mon_str = d_mon_y.group(2).lower()
+            year_val = int(d_mon_y.group(3))
+            if mon_str in MONTH_MAP:
+                month_val = MONTH_MAP[mon_str]
+                try:
+                    dt = datetime(year_val, month_val, day_val)
+                    iso_res = dt.strftime("%Y-%m-%d")
+                    return DateValidationResult(iso_res, [])
+                except ValueError:
+                    return DateValidationResult(
+                        clean_date,
+                        [f"Date value '{clean_date}' is not a valid calendar date. Human investigator verification is required."],
+                        is_ambiguous=False,
+                    )
+
+        # Mon DD, YYYY or Month DD, YYYY
+        mon_d_y = re.match(r"^([A-Za-z]{3,9})[-/\s]+(\d{1,2}),?[-/\s]+(\d{4})$", clean_date)
+        if mon_d_y:
+            mon_str = mon_d_y.group(1).lower()
+            day_val = int(mon_d_y.group(2))
+            year_val = int(mon_d_y.group(3))
+            if mon_str in MONTH_MAP:
+                month_val = MONTH_MAP[mon_str]
+                try:
+                    dt = datetime(year_val, month_val, day_val)
+                    iso_res = dt.strftime("%Y-%m-%d")
+                    return DateValidationResult(iso_res, [])
+                except ValueError:
+                    return DateValidationResult(
+                        clean_date,
+                        [f"Date value '{clean_date}' is not a valid calendar date. Human investigator verification is required."],
+                        is_ambiguous=False,
+                    )
+
+        # 3. Numeric slash/dash date: DD/MM/YYYY or MM/DD/YYYY
+        slash_match = re.match(r"^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$", clean_date)
+        if slash_match:
+            p1 = int(slash_match.group(1))
+            p2 = int(slash_match.group(2))
+            y = int(slash_match.group(3))
+
+            if p1 > 12 and p2 <= 12:
+                try:
+                    dt = datetime(y, p2, p1)
+                    return DateValidationResult(dt.strftime("%Y-%m-%d"), [])
+                except ValueError:
+                    return DateValidationResult(
+                        clean_date,
+                        [f"Date value '{clean_date}' is not a valid calendar date. Human investigator verification is required."],
+                        is_ambiguous=False,
+                    )
+            elif p1 <= 12 and p2 > 12:
+                try:
+                    dt = datetime(y, p1, p2)
+                    return DateValidationResult(dt.strftime("%Y-%m-%d"), [])
+                except ValueError:
+                    return DateValidationResult(
+                        clean_date,
+                        [f"Date value '{clean_date}' is not a valid calendar date. Human investigator verification is required."],
+                        is_ambiguous=False,
+                    )
+            elif p1 == p2 and p1 <= 12:
+                try:
+                    dt = datetime(y, p1, p2)
+                    return DateValidationResult(dt.strftime("%Y-%m-%d"), [])
+                except ValueError:
+                    return DateValidationResult(
+                        clean_date,
+                        [f"Date value '{clean_date}' is not a valid calendar date. Human investigator verification is required."],
+                        is_ambiguous=False,
+                    )
+            elif p1 <= 12 and p2 <= 12:
+                return DateValidationResult(
+                    clean_date,
+                    [
+                        f"Date value '{clean_date}' is ambiguous (could represent DD/MM/YYYY or MM/DD/YYYY). "
+                        "Human investigator verification is required."
+                    ],
+                    is_ambiguous=True,
+                )
+            else:
+                return DateValidationResult(
+                    clean_date,
+                    [f"Date value '{clean_date}' is not a valid calendar date. Human investigator verification is required."],
+                    is_ambiguous=False,
+                )
+
+        # 4. YYYY/MM/DD or YYYY.MM.DD
+        y_m_d = re.match(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$", clean_date)
+        if y_m_d:
+            y = int(y_m_d.group(1))
+            m = int(y_m_d.group(2))
+            d = int(y_m_d.group(3))
+            try:
+                dt = datetime(y, m, d)
+                return DateValidationResult(dt.strftime("%Y-%m-%d"), [])
+            except ValueError:
+                return DateValidationResult(
+                    clean_date,
+                    [f"Date value '{clean_date}' is not a valid calendar date. Human investigator verification is required."],
+                    is_ambiguous=False,
+                )
+
+        # Non-conforming date format
+        return DateValidationResult(
+            clean_date,
+            [
                 f"Date value '{clean_date}' does not conform to ISO-8601 YYYY-MM-DD format. "
                 "Human investigator verification is required."
-            )
-            return clean_date, warnings
-
-        # Semantic date validation (valid calendar day)
-        try:
-            datetime.strptime(clean_date, "%Y-%m-%d")
-        except ValueError:
-            warnings.append(
-                f"Date value '{clean_date}' is not a valid calendar date. "
-                "Human investigator verification is required."
-            )
-
-        return clean_date, warnings
+            ],
+            is_ambiguous=False,
+        )
 
     def validate_confidence_score(self, confidence: Optional[float]) -> Tuple[float, List[str]]:
         """Validate confidence score falls strictly within [0.0, 1.0].
@@ -122,7 +287,8 @@ class ExtractionQualityService:
     ) -> Tuple[Optional[SourceReference], List[str]]:
         """Validate character offsets against normalized source text.
 
-        Ensures referenced excerpt actually exists at the reported offsets.
+        Ensures referenced excerpt actually exists at the reported offsets with
+        resilience to whitespace, newlines, and typographic variations.
         If offsets are mismatched, clears offsets and marks is_traceable=False.
         """
         if not source_ref or not source_ref.excerpt:
@@ -144,13 +310,27 @@ class ExtractionQualityService:
                 source_ref.is_traceable = False
                 return source_ref, warnings
 
-            # Check exact substring match
+            # Check substring match with resilience to whitespace/newlines/dashes
             actual_slice = source_text[start:end]
-            if actual_slice != excerpt:
-                # Check case-insensitive
-                if actual_slice.lower() == excerpt.lower():
-                    # Tolerable casing difference
+            if actual_slice == excerpt or actual_slice.lower() == excerpt.lower():
+                pass
+            else:
+                norm_slice = normalize_text_for_comparison(actual_slice).lower()
+                norm_exc = normalize_text_for_comparison(excerpt).lower()
+                if norm_slice == norm_exc:
                     pass
+                elif "..." in norm_exc or "…" in norm_exc:
+                    segments = [s.strip() for s in re.split(r"\.{2,}|…", norm_exc) if s.strip()]
+                    if len(segments) >= 2 and norm_slice.startswith(segments[0]) and norm_slice.endswith(segments[-1]):
+                        pass
+                    else:
+                        warnings.append(
+                            f"Reported offsets [{start}:{end}] yield '{actual_slice[:30]}...', "
+                            f"which does not match cited excerpt '{excerpt[:30]}...'."
+                        )
+                        source_ref.char_offset_start = None
+                        source_ref.char_offset_end = None
+                        source_ref.is_traceable = False
                 else:
                     warnings.append(
                         f"Reported offsets [{start}:{end}] yield '{actual_slice[:30]}...', "
