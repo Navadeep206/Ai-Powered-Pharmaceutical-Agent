@@ -78,6 +78,7 @@ coverage.xml
 .hypothesis/
 .mypy_cache/
 .ruff_cache/
+*.zip
 
 # ------------------------------------------------------------------------------
 # Node.js & Frontend Artifacts
