@@ -33,7 +33,7 @@ class Settings(BaseSettings):
 
     # AI / LLM Configuration
     GROQ_API_KEY: str = "your_groq_api_key"
-    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_MODEL: str = "qwen/qwen3.8-27b"
     GROQ_TEMPERATURE: float = 0.0
     GROQ_MAX_TOKENS: int = 1024
     GROQ_TIMEOUT: float = 30.0

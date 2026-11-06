@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 import groq
 from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import AliasChoices, BaseModel, Field, ValidationError
 
 from app.agents.state import RCAWorkflowState
 from app.core.exceptions import (
@@ -41,10 +41,16 @@ class FishboneCauseItemModel(BaseModel):
 
     cause_id: Optional[str] = None
     category: FishboneCategoryEnum
-    cause_description: str
+    cause_description: str = Field(..., validation_alias=AliasChoices("cause_description", "cause", "description"))
     reasoning: Optional[str] = None
-    supporting_evidence_references: List[str] = Field(default_factory=list)
-    contradictory_evidence_references: List[str] = Field(default_factory=list)
+    supporting_evidence_references: List[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("supporting_evidence_references", "evidence_references", "supporting_evidence"),
+    )
+    contradictory_evidence_references: List[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("contradictory_evidence_references", "contradictory_evidence"),
+    )
     confidence: float = Field(default=0.85, ge=0.0, le=1.0)
     uncertainty_notes: Optional[str] = None
     contributing_factors: List[str] = Field(default_factory=list)

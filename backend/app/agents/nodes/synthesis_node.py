@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 import groq
 from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import AliasChoices, BaseModel, Field, ValidationError
 
 from app.agents.state import RCAWorkflowState
 from app.core.exceptions import (
@@ -40,25 +40,40 @@ logger = get_logger("agents.nodes.synthesis")
 class PotentialRootCauseItemModel(BaseModel):
     """Transfer model for candidate root cause in LLM response."""
 
-    cause_id: Optional[str] = None
-    cause_description: str
-    cause_category: str
+    cause_id: Optional[str] = Field(default=None, validation_alias=AliasChoices("cause_id", "id"))
+    cause_description: str = Field(..., validation_alias=AliasChoices("cause_description", "description", "cause"))
+    cause_category: str = Field(
+        default="Equipment",
+        validation_alias=AliasChoices("cause_category", "category", "source_method"),
+    )
     source_method: str = "Combined"
-    supporting_evidence: List[str] = Field(default_factory=list)
-    contradictory_evidence: List[str] = Field(default_factory=list)
+    supporting_evidence: List[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("supporting_evidence", "evidence_references", "supporting_evidence_references"),
+    )
+    contradictory_evidence: List[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("contradictory_evidence", "contradictory_evidence_references"),
+    )
     confidence: float = Field(default=0.85, ge=0.0, le=1.0)
-    rationale: str
+    rationale: str = Field(
+        default="",
+        validation_alias=AliasChoices("rationale", "technical_rationale", "reasoning"),
+    )
     uncertainty_notes: Optional[str] = None
 
 
 class ContributingFactorItemModel(BaseModel):
     """Transfer model for secondary contributing factor in LLM response."""
 
-    factor_id: Optional[str] = None
-    description: str
-    category: str
+    factor_id: Optional[str] = Field(default=None, validation_alias=AliasChoices("factor_id", "id"))
+    description: str = Field(..., validation_alias=AliasChoices("description", "factor_description"))
+    category: str = Field(default="Process", validation_alias=AliasChoices("category", "factor_category"))
     related_cause_id: Optional[str] = None
-    supporting_evidence: List[str] = Field(default_factory=list)
+    supporting_evidence: List[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("supporting_evidence", "evidence_references"),
+    )
 
 
 class SynthesisLLMResponse(BaseModel):

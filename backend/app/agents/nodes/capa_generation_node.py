@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 import groq
 from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import AliasChoices, BaseModel, Field, ValidationError
 
 from app.agents.state import CAPAWorkflowState
 from app.core.exceptions import (
@@ -40,27 +40,60 @@ logger = get_logger("agents.nodes.capa_generation")
 class EffectivenessVerificationPlanModel(BaseModel):
     """Pydantic transfer model for effectiveness verification from LLM."""
 
-    measurable_outcome: str
-    verification_method: str
-    evidence_required: str
-    suggested_verifier_role: str
-    verification_timeframe: str
-    failure_criteria: str
+    measurable_outcome: str = Field(
+        ...,
+        validation_alias=AliasChoices("measurable_outcome", "outcome", "target_criteria"),
+    )
+    verification_method: str = Field(
+        ...,
+        validation_alias=AliasChoices("verification_method", "method", "protocol"),
+    )
+    evidence_required: str = Field(
+        ...,
+        validation_alias=AliasChoices("evidence_required", "evidence", "documentation_required"),
+    )
+    suggested_verifier_role: str = Field(
+        default="QA Compliance Specialist",
+        validation_alias=AliasChoices("suggested_verifier_role", "verifier_role", "verifier"),
+    )
+    verification_timeframe: str = Field(
+        default="Within 30 days post-implementation",
+        validation_alias=AliasChoices("verification_timeframe", "timeframe", "duration"),
+    )
+    failure_criteria: str = Field(
+        default="Any recurrence of deviation parameter excursion",
+        validation_alias=AliasChoices("failure_criteria", "failure_condition"),
+    )
 
 
 class CAPARecommendationItemModel(BaseModel):
     """Pydantic transfer model for a single CAPA suggestion from LLM."""
 
-    capa_id: Optional[str] = None
+    capa_id: Optional[str] = Field(default=None, validation_alias=AliasChoices("capa_id", "id"))
     action_type: CAPATypeEnum
-    description: str
-    related_root_cause_id: Optional[str] = None
-    rationale: str
-    supporting_evidence_references: List[str] = Field(default_factory=list)
+    description: str = Field(..., validation_alias=AliasChoices("description", "action_description", "action"))
+    related_root_cause_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("related_root_cause_id", "root_cause_id"),
+    )
+    rationale: str = Field(
+        default="",
+        validation_alias=AliasChoices("rationale", "justification", "reasoning"),
+    )
+    supporting_evidence_references: List[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("supporting_evidence_references", "evidence_references", "supporting_evidence"),
+    )
     assumptions: List[str] = Field(default_factory=list)
     dependencies: List[str] = Field(default_factory=list)
-    suggested_owner_role: str
-    suggested_target_date: Optional[str] = None
+    suggested_owner_role: str = Field(
+        default="Quality Assurance",
+        validation_alias=AliasChoices("suggested_owner_role", "owner_role", "action_owner"),
+    )
+    suggested_target_date: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("suggested_target_date", "target_date"),
+    )
     effectiveness_verification: EffectivenessVerificationPlanModel
 
 
